@@ -1,0 +1,41 @@
+local CuteWare = loadstring(game:HttpGet("https://raw.githubusercontent.com/suborbann/CuteWare-UI-Library/refs/heads/main/source"))()
+CuteWare:Init()
+
+local Window = CuteWare:CreateWindow({
+    Name = "cuteware",
+    Subtitle = "uwu executor menu",
+    Size = UDim2.new(0, 560, 0, 380),
+})
+
+local MainTab = Window:CreateTab({ Name = "Main" })
+local Section = MainTab:CreateSection("Combat")
+
+Section:CreateToggle({
+    Name = "Aimbot",
+    Flag = "AimbotEnabled",
+    Callback = function(state) print(state) end,
+})
+
+Section:CreateSlider({
+    Name = "FOV",
+    Range = {10, 200},
+    Increment = 1,
+    CurrentValue = 90,
+    Flag = "FOVValue",
+    Callback = function(v) print(v) end,
+})
+
+Section:CreateDropdown({
+    Name = "Target Priority",
+    Options = {"Closest", "Health", "Random"},
+    CurrentOption = "Closest",
+    Flag = "Priority",
+})
+
+Section:CreateColorPicker({
+    Name = "ESP Color",
+    CurrentColor = Color3.fromRGB(255, 130, 180),
+    Flag = "ESPColor",
+})
+
+CuteWare:Notify({ Title = "cuteware", Content = "loaded successfully!", Duration = 4 })

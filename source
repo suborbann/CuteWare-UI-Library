@@ -138,6 +138,7 @@ function CuteWare:Init()
 		Name = "CuteWare",
 		ResetOnSpawn = false,
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		DisplayOrder = 999, -- keeps CuteWare above other ScreenGuis (topmost)
 		Parent = PlayerGui,
 	})
 	self.ScreenGui = ScreenGui
@@ -367,9 +368,6 @@ function CuteWare:CreateWindow(config)
 			LayoutOrder = layoutOrder,
 			Parent = Controls,
 		}, { corner(6) })
-		-- background eases in (slightly darker than its own hover color) and
-		-- text tints, matching the request: buttons get a bit darker on hover
-		-- rather than just changing text color.
 		Btn.MouseEnter:Connect(function()
 			quickTween(Btn, { BackgroundTransparency = 0, TextColor3 = hoverText }, 0.15)
 		end)
@@ -379,7 +377,6 @@ function CuteWare:CreateWindow(config)
 		return Btn
 	end
 
-	-- all three share the same look/size; only the hover tint differs
 	local MinimizeBtn = makeControlButton("—", darken(Theme.Tertiary, 0.9), Theme.Accent, 1)
 	local MaximizeBtn = makeControlButton("▢", darken(Theme.Tertiary, 0.9), Theme.Accent, 2)
 	local CloseBtn = makeControlButton("×", darken(Theme.Error, 0.5), Theme.Text, 3)
@@ -387,52 +384,60 @@ function CuteWare:CreateWindow(config)
 	--------------------------------------------------------------
 	-- MINIMIZE / MAXIMIZE
 	--------------------------------------------------------------
+	-- IMPORTANT: we track the window's "restored" size/position in plain
+	-- variables (windowSize / windowPos) instead of reading Main.Size /
+	-- Main.Position at click time. Reading those properties directly was the
+	-- actual bug behind "minimize doesn't open back up": if you clicked
+	-- while a tween was still mid-flight, you'd read a PARTIAL, in-between
+	-- value and store that as the size/position to restore to, so the
+	-- "restore" tween would animate to a wrong (sometimes near-zero) size.
 	local minimized, maximized = false, false
-	local sizeBeforeMinimize = size
-	local sizeBeforeMaximize, posBeforeMaximize = size, Main.Position
+	local windowSize = size
+	local windowPos = Main.Position
+
+	local function setMinimizedVisual(isMin)
+		topBarMasks.MaskBL.Visible = not isMin
+		topBarMasks.MaskBR.Visible = not isMin
+		MinimizeBtn.Text = isMin and "+" or "—"
+	end
+
 	local clearDragTarget -- assigned once dragging is set up below
 
+	local function restoreFromMaximize()
+		maximized = false
+		MaximizeBtn.Text = "▢"
+		quickTween(Main, { Size = windowSize, Position = windowPos }, 0.28)
+	end
+
 	MinimizeBtn.MouseButton1Click:Connect(function()
-		if maximized then return end -- ignore while maximized
+		if maximized then return end -- restore from maximize first
 		minimized = not minimized
 		if clearDragTarget then clearDragTarget() end
 		if minimized then
-			sizeBeforeMinimize = Main.Size
-			quickTween(Main, { Size = UDim2.new(sizeBeforeMinimize.X.Scale, sizeBeforeMinimize.X.Offset, 0, TOPBAR_HEIGHT) }, 0.28)
-			MinimizeBtn.Text = "+"
-			-- topbar becomes the whole window: round all four corners
-			topBarMasks.MaskBL.Visible = false
-			topBarMasks.MaskBR.Visible = false
+			quickTween(Main, { Size = UDim2.new(windowSize.X.Scale, windowSize.X.Offset, 0, TOPBAR_HEIGHT) }, 0.28)
 		else
-			quickTween(Main, { Size = sizeBeforeMinimize }, 0.28)
-			MinimizeBtn.Text = "—"
-			topBarMasks.MaskBL.Visible = true
-			topBarMasks.MaskBR.Visible = true
+			quickTween(Main, { Size = windowSize }, 0.28)
 		end
+		setMinimizedVisual(minimized)
 	end)
 
 	MaximizeBtn.MouseButton1Click:Connect(function()
-		maximized = not maximized
 		if clearDragTarget then clearDragTarget() end
-		if maximized then
-			sizeBeforeMaximize, posBeforeMaximize = Main.Size, Main.Position
+		if not maximized then
 			if minimized then
 				minimized = false
-				MinimizeBtn.Text = "—"
-				topBarMasks.MaskBL.Visible = true
-				topBarMasks.MaskBR.Visible = true
+				setMinimizedVisual(false)
 			end
+			maximized = true
 			quickTween(Main, { Size = UDim2.new(1, 0, 1, 0), Position = UDim2.new(0, 0, 0, 0) }, 0.28)
 			MaximizeBtn.Text = "❐"
 		else
-			quickTween(Main, { Size = sizeBeforeMaximize, Position = posBeforeMaximize }, 0.28)
-			MaximizeBtn.Text = "▢"
+			restoreFromMaximize()
 		end
 	end)
 
 	CloseBtn.MouseButton1Click:Connect(function()
-		local closeSize = Main.Size
-		quickTween(Main, { Size = UDim2.new(0, closeSize.X.Offset * 0.9, 0, closeSize.Y.Offset * 0.9), BackgroundTransparency = 1 }, 0.2)
+		quickTween(Main, { Size = UDim2.new(0, windowSize.X.Offset * 0.9, 0, windowSize.Y.Offset * 0.9), BackgroundTransparency = 1 }, 0.2)
 		task.wait(0.2)
 		Main.Visible = false
 	end)
@@ -449,24 +454,36 @@ function CuteWare:CreateWindow(config)
 			-- Without this, the RenderStepped loop below kept easing Main
 			-- toward a stale targetPos left over from the last drag, which
 			-- yanked the window back to its old spot right after
-			-- maximize/minimize played their tween (the "maximize slips
-			-- almost immediately" bug).
+			-- maximize/minimize played their tween.
 			targetPos = nil
 			dragging = false
 		end
 
+		local function isOverControls(pos)
+			local abs, size2 = Controls.AbsolutePosition, Controls.AbsoluteSize
+			return pos.X >= abs.X and pos.X <= abs.X + size2.X and pos.Y >= abs.Y and pos.Y <= abs.Y + size2.Y
+		end
+
 		TopBar.InputBegan:Connect(function(input)
-			if maximized then return end -- don't drag a maximized window
-			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-				dragging = true
-				dragStart = input.Position
-				startPos = Main.Position
-				input.Changed:Connect(function()
-					if input.UserInputState == Enum.UserInputState.End then
-						dragging = false
-					end
-				end)
+			if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+			if isOverControls(input.Position) then return end -- don't start a drag from the buttons
+
+			if maximized then
+				-- clicking the topbar of a maximized window restores it,
+				-- as requested, instead of trying to drag a fullscreen window
+				restoreFromMaximize()
+				return
 			end
+
+			dragging = true
+			dragStart = input.Position
+			startPos = Main.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+					windowPos = Main.Position
+				end
+			end)
 		end)
 
 		UserInputService.InputChanged:Connect(function(input)
@@ -484,6 +501,7 @@ function CuteWare:CreateWindow(config)
 		RunService.RenderStepped:Connect(function(dt)
 			if targetPos and not maximized then
 				Main.Position = Main.Position:Lerp(targetPos, math.clamp(dt * 16, 0, 1))
+				windowPos = Main.Position
 			end
 		end)
 	end
@@ -898,11 +916,17 @@ function CuteWare:CreateWindow(config)
 
 				local optionButtons = {}
 				for i, opt in ipairs(options) do
+					-- was: (not multi and opt == current) or (multi and selectedSet[opt]) and Theme.Accent or Theme.SubText
+					-- classic Lua "ternary" trap: if the first `A or B` term evaluates
+					-- to the boolean `true`, the whole chain short-circuits to `true`
+					-- (a boolean) instead of ever reaching Theme.Accent/Theme.SubText,
+					-- which is exactly what threw "Color3 expected got boolean".
+					local isSelected = multi and selectedSet[opt] or (not multi and opt == current)
 					local OptBtn = create("TextButton", {
 						Text = tostring(opt),
 						Font = Theme.Font,
 						TextSize = 13,
-						TextColor3 = (not multi and opt == current) or (multi and selectedSet[opt]) and Theme.Accent or Theme.SubText,
+						TextColor3 = isSelected and Theme.Accent or Theme.SubText,
 						BackgroundColor3 = Theme.Tertiary,
 						BackgroundTransparency = 1,
 						Size = UDim2.new(1, 0, 0, 30),

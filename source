@@ -83,6 +83,45 @@ end
 
 -- HSV <-> Color3 helpers already handled by Color3.fromHSV / Color3:ToHSV()
 
+local function darken(color, factor)
+	factor = factor or 0.85
+	return Color3.new(
+		math.clamp(color.R * factor, 0, 1),
+		math.clamp(color.G * factor, 0, 1),
+		math.clamp(color.B * factor, 0, 1)
+	)
+end
+
+-- ClipsDescendants only clips to the RECTANGULAR bounds of a frame, not to
+-- the rounded shape a UICorner draws. So an opaque child panel (topbar,
+-- tab list) sitting flush against Main's edges will visually square off
+-- Main's rounded corners. To fix this we give panels that touch the
+-- window's outer edge their OWN UICorner, then mask (flatten) whichever
+-- corners are NOT on the outer edge with small same-color squares.
+local function applyPanelCorners(panel, radius, keep)
+	corner(radius).Parent = panel
+	local color = panel.BackgroundColor3
+	local masks = {}
+	local function mask(name, pos)
+		local m = create("Frame", {
+			Name = name,
+			BackgroundColor3 = color,
+			BorderSizePixel = 0,
+			Position = pos,
+			Size = UDim2.new(0, radius, 0, radius),
+			ZIndex = (panel.ZIndex or 1),
+			Parent = panel,
+		})
+		masks[name] = m
+		return m
+	end
+	if not keep.TopLeft then mask("MaskTL", UDim2.new(0, 0, 0, 0)) end
+	if not keep.TopRight then mask("MaskTR", UDim2.new(1, -radius, 0, 0)) end
+	if not keep.BottomLeft then mask("MaskBL", UDim2.new(0, 0, 1, -radius)) end
+	if not keep.BottomRight then mask("MaskBR", UDim2.new(1, -radius, 1, -radius)) end
+	return masks
+end
+
 --------------------------------------------------------------------
 -- LIBRARY ROOT
 --------------------------------------------------------------------
@@ -258,6 +297,9 @@ function CuteWare:CreateWindow(config)
 		Size = UDim2.new(1, 0, 0, TOPBAR_HEIGHT),
 		Parent = Main,
 	})
+	-- Top corners always rounded; bottom corners masked flat normally, but
+	-- revealed (rounded) when minimized since the topbar becomes the whole window.
+	local topBarMasks = applyPanelCorners(TopBar, 12, { TopLeft = true, TopRight = true, BottomLeft = false, BottomRight = false })
 
 	if subtitle and subtitle ~= "" then
 		create("TextLabel", {
@@ -313,55 +355,78 @@ function CuteWare:CreateWindow(config)
 		}),
 	})
 
-	local function makeControlButton(text, hoverColor, layoutOrder)
+	local function makeControlButton(text, hoverBg, hoverText, layoutOrder)
 		local Btn = create("TextButton", {
 			Text = text,
 			Font = Theme.FontBold,
 			TextSize = 15,
 			TextColor3 = Theme.SubText,
+			BackgroundColor3 = hoverBg,
 			BackgroundTransparency = 1,
 			Size = UDim2.new(0, 28, 0, 26),
 			LayoutOrder = layoutOrder,
 			Parent = Controls,
-		})
-		Btn.MouseEnter:Connect(function() quickTween(Btn, { TextColor3 = hoverColor }, 0.15) end)
-		Btn.MouseLeave:Connect(function() quickTween(Btn, { TextColor3 = Theme.SubText }, 0.15) end)
+		}, { corner(6) })
+		-- background eases in (slightly darker than its own hover color) and
+		-- text tints, matching the request: buttons get a bit darker on hover
+		-- rather than just changing text color.
+		Btn.MouseEnter:Connect(function()
+			quickTween(Btn, { BackgroundTransparency = 0, TextColor3 = hoverText }, 0.15)
+		end)
+		Btn.MouseLeave:Connect(function()
+			quickTween(Btn, { BackgroundTransparency = 1, TextColor3 = Theme.SubText }, 0.15)
+		end)
 		return Btn
 	end
 
-	local MinimizeBtn = makeControlButton("—", Theme.Accent, 1)
-	local MaximizeBtn = makeControlButton("▢", Theme.Accent, 2)
-	local CloseBtn = makeControlButton("×", Theme.Error, 3)
-	CloseBtn.TextSize = 18
+	-- all three share the same look/size; only the hover tint differs
+	local MinimizeBtn = makeControlButton("—", darken(Theme.Tertiary, 0.9), Theme.Accent, 1)
+	local MaximizeBtn = makeControlButton("▢", darken(Theme.Tertiary, 0.9), Theme.Accent, 2)
+	local CloseBtn = makeControlButton("×", darken(Theme.Error, 0.5), Theme.Text, 3)
 
 	--------------------------------------------------------------
 	-- MINIMIZE / MAXIMIZE
 	--------------------------------------------------------------
 	local minimized, maximized = false, false
 	local sizeBeforeMinimize = size
-	local sizeBeforeMaximize, posBeforeMaximize = size, nil
+	local sizeBeforeMaximize, posBeforeMaximize = size, Main.Position
+	local clearDragTarget -- assigned once dragging is set up below
 
 	MinimizeBtn.MouseButton1Click:Connect(function()
+		if maximized then return end -- ignore while maximized
 		minimized = not minimized
+		if clearDragTarget then clearDragTarget() end
 		if minimized then
 			sizeBeforeMinimize = Main.Size
 			quickTween(Main, { Size = UDim2.new(sizeBeforeMinimize.X.Scale, sizeBeforeMinimize.X.Offset, 0, TOPBAR_HEIGHT) }, 0.28)
 			MinimizeBtn.Text = "+"
+			-- topbar becomes the whole window: round all four corners
+			topBarMasks.MaskBL.Visible = false
+			topBarMasks.MaskBR.Visible = false
 		else
 			quickTween(Main, { Size = sizeBeforeMinimize }, 0.28)
 			MinimizeBtn.Text = "—"
+			topBarMasks.MaskBL.Visible = true
+			topBarMasks.MaskBR.Visible = true
 		end
 	end)
 
 	MaximizeBtn.MouseButton1Click:Connect(function()
 		maximized = not maximized
+		if clearDragTarget then clearDragTarget() end
 		if maximized then
 			sizeBeforeMaximize, posBeforeMaximize = Main.Size, Main.Position
-			minimized = false
-			MinimizeBtn.Text = "—"
+			if minimized then
+				minimized = false
+				MinimizeBtn.Text = "—"
+				topBarMasks.MaskBL.Visible = true
+				topBarMasks.MaskBR.Visible = true
+			end
 			quickTween(Main, { Size = UDim2.new(1, 0, 1, 0), Position = UDim2.new(0, 0, 0, 0) }, 0.28)
+			MaximizeBtn.Text = "❐"
 		else
 			quickTween(Main, { Size = sizeBeforeMaximize, Position = posBeforeMaximize }, 0.28)
+			MaximizeBtn.Text = "▢"
 		end
 	end)
 
@@ -380,7 +445,18 @@ function CuteWare:CreateWindow(config)
 		local dragStart, startPos
 		local targetPos
 
+		clearDragTarget = function()
+			-- Without this, the RenderStepped loop below kept easing Main
+			-- toward a stale targetPos left over from the last drag, which
+			-- yanked the window back to its old spot right after
+			-- maximize/minimize played their tween (the "maximize slips
+			-- almost immediately" bug).
+			targetPos = nil
+			dragging = false
+		end
+
 		TopBar.InputBegan:Connect(function(input)
+			if maximized then return end -- don't drag a maximized window
 			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 				dragging = true
 				dragStart = input.Position
@@ -394,6 +470,7 @@ function CuteWare:CreateWindow(config)
 		end)
 
 		UserInputService.InputChanged:Connect(function(input)
+			if maximized then return end
 			if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
 				local delta = input.Position - dragStart
 				targetPos = UDim2.new(
@@ -405,19 +482,35 @@ function CuteWare:CreateWindow(config)
 
 		-- smoothing loop: eases Main.Position toward targetPos each frame (fast but fluid)
 		RunService.RenderStepped:Connect(function(dt)
-			if targetPos then
+			if targetPos and not maximized then
 				Main.Position = Main.Position:Lerp(targetPos, math.clamp(dt * 16, 0, 1))
 			end
 		end)
 	end
 
 	-- TAB LIST (left side) -------------------------------------------
-	local TabList = create("Frame", {
-		Name = "TabList",
+	-- Split into a Shell (holds the rounded background + corner masks) and
+	-- an inner content frame (holds the UIListLayout for tab buttons).
+	-- Keeping them separate matters: UIListLayout repositions EVERY sibling
+	-- GuiObject in its parent, so if the corner-mask squares lived directly
+	-- inside the same frame as the tab buttons' UIListLayout, they'd get
+	-- sucked into the list and rendered as extra rows instead of sitting in
+	-- the corners.
+	local TabListShell = create("Frame", {
+		Name = "TabListShell",
 		BackgroundColor3 = Theme.Secondary,
 		Position = UDim2.new(0, 0, 0, TOPBAR_HEIGHT),
 		Size = UDim2.new(0, 140, 1, -TOPBAR_HEIGHT),
 		Parent = Main,
+	})
+	-- Only its bottom-left corner touches the window's outer edge
+	applyPanelCorners(TabListShell, 12, { TopLeft = false, TopRight = false, BottomLeft = true, BottomRight = false })
+
+	local TabList = create("Frame", {
+		Name = "TabList",
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 1, 0),
+		Parent = TabListShell,
 	}, {
 		create("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }),
 		padding(10),
@@ -458,7 +551,6 @@ function CuteWare:CreateWindow(config)
 			BackgroundTransparency = 1,
 			Size = UDim2.new(1, 0, 1, 0),
 			CanvasSize = UDim2.new(0, 0, 0, 0),
-			AutomaticCanvasSize = Enum.AutomaticCanvasSize.Y,
 			ScrollBarThickness = 4,
 			ScrollBarImageColor3 = Theme.Accent,
 			Visible = false,
@@ -467,6 +559,18 @@ function CuteWare:CreateWindow(config)
 			padding(14),
 			create("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder }),
 		})
+
+		-- Manual canvas sizing instead of AutomaticCanvasSize: some Roblox
+		-- builds/executors don't expose that enum member at all (that's what
+		-- threw "AutomaticCanvasSize is not a valid member of Enum"), so we
+		-- just resize the canvas ourselves whenever the list layout's content
+		-- size changes.
+		local PageLayout = Page:FindFirstChildOfClass("UIListLayout")
+		local function updateCanvas()
+			Page.CanvasSize = UDim2.new(0, 0, 0, PageLayout.AbsoluteContentSize.Y + 28)
+		end
+		PageLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateCanvas)
+		updateCanvas()
 
 		-- Tab.Active is the single source of truth for "is this tab selected".
 		-- Previously hover logic read TabButton/Page state directly, which
@@ -544,7 +648,7 @@ function CuteWare:CreateWindow(config)
 					Parent = SectionHolder,
 				}, { corner(8) })
 
-				Btn.MouseEnter:Connect(function() quickTween(Btn, { BackgroundColor3 = Theme.AccentDark }, 0.15) end)
+				Btn.MouseEnter:Connect(function() quickTween(Btn, { BackgroundColor3 = darken(Theme.Tertiary, 0.75) }, 0.15) end)
 				Btn.MouseLeave:Connect(function() quickTween(Btn, { BackgroundColor3 = Theme.Tertiary }, 0.15) end)
 				Btn.MouseButton1Down:Connect(function() quickTween(Btn, { Size = UDim2.new(1, -6, 0, 32) }, 0.08) end)
 				Btn.MouseButton1Up:Connect(function() quickTween(Btn, { Size = UDim2.new(1, 0, 0, 34) }, 0.12) end)
@@ -737,6 +841,8 @@ function CuteWare:CreateWindow(config)
 					Size = UDim2.new(1, 0, 0, 32),
 					Parent = Holder,
 				}, { corner(8) })
+				Box.MouseEnter:Connect(function() quickTween(Box, { BackgroundColor3 = darken(Theme.Tertiary, 0.75) }, 0.15) end)
+				Box.MouseLeave:Connect(function() quickTween(Box, { BackgroundColor3 = Theme.Tertiary }, 0.15) end)
 
 				local SelectedLabel = create("TextLabel", {
 					Text = tostring(current or "None"),

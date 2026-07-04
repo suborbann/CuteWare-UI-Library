@@ -8,7 +8,7 @@
 ╚█████╔╝╚██████╔╝░░░██║░░░███████╗░░░░░░░░╚██╔╝░╚██╔╝░██║░░██║██║░░██║███████╗
 ░╚════╝░░╚═════╝░░░░╚═╝░░░╚══════╝░░░░░░░░░╚═╝░░░╚═╝░░╚═╝░░╚═╝╚═╝░░╚═╝╚══════╝
                                                https://dsc.gg/cuteware
-]]
+--]]
 
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
@@ -196,8 +196,12 @@ end
 function CuteWare:CreateWindow(config)
 	config = config or {}
 	local windowName = config.Name or "CuteWare"
-	local subtitle = config.Subtitle or "made with cuteware"
+	local subtitle = config.Subtitle -- can be nil now
 	local size = config.Size or UDim2.new(0, 560, 0, 380)
+	local backgroundImage = config.BackgroundImage
+	local backgroundTransparency = config.BackgroundImageTransparency or 0.75
+
+	local TOPBAR_HEIGHT = 38
 
 	local Window = {}
 	Window.Tabs = {}
@@ -214,7 +218,35 @@ function CuteWare:CreateWindow(config)
 		stroke(Theme.Stroke, 1),
 	})
 
-	-- Fade / scale in on open
+	local BackgroundImage
+	if backgroundImage then
+		BackgroundImage = create("ImageLabel", {
+			Name = "CustomBackground",
+			Image = type(backgroundImage) == "number" and ("rbxassetid://" .. backgroundImage) or tostring(backgroundImage),
+			BackgroundTransparency = 1,
+			ImageTransparency = backgroundTransparency,
+			ScaleType = Enum.ScaleType.Crop,
+			Size = UDim2.new(1, 0, 1, 0),
+			ZIndex = 0,
+			Parent = Main,
+		})
+	end
+
+	function Window:SetBackgroundImage(imageId, transparency)
+		if not BackgroundImage then
+			BackgroundImage = create("ImageLabel", {
+				Name = "CustomBackground",
+				BackgroundTransparency = 1,
+				ScaleType = Enum.ScaleType.Crop,
+				Size = UDim2.new(1, 0, 1, 0),
+				ZIndex = 0,
+				Parent = Main,
+			})
+		end
+		BackgroundImage.Image = type(imageId) == "number" and ("rbxassetid://" .. imageId) or tostring(imageId)
+		BackgroundImage.ImageTransparency = transparency or backgroundTransparency
+	end
+
 	Main.Size = UDim2.new(0, size.X.Offset * 0.9, 0, size.Y.Offset * 0.9)
 	Main.BackgroundTransparency = 1
 	quickTween(Main, { Size = size, BackgroundTransparency = 0 }, 0.28)
@@ -223,58 +255,119 @@ function CuteWare:CreateWindow(config)
 	local TopBar = create("Frame", {
 		Name = "TopBar",
 		BackgroundColor3 = Theme.Secondary,
-		Size = UDim2.new(1, 0, 0, 46),
+		Size = UDim2.new(1, 0, 0, TOPBAR_HEIGHT),
 		Parent = Main,
+	})
+
+	if subtitle and subtitle ~= "" then
+		create("TextLabel", {
+			Text = windowName,
+			Font = Theme.FontBold,
+			TextSize = 16,
+			TextColor3 = Theme.Text,
+			BackgroundTransparency = 1,
+			Position = UDim2.new(0, 16, 0, 4),
+			Size = UDim2.new(1, -110, 0, 18),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = TopBar,
+		})
+		create("TextLabel", {
+			Text = subtitle,
+			Font = Theme.Font,
+			TextSize = 12,
+			TextColor3 = Theme.SubText,
+			BackgroundTransparency = 1,
+			Position = UDim2.new(0, 16, 0, 20),
+			Size = UDim2.new(1, -110, 0, 14),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = TopBar,
+		})
+	else
+		create("TextLabel", {
+			Text = windowName,
+			Font = Theme.FontBold,
+			TextSize = 20,
+			TextColor3 = Theme.Text,
+			BackgroundTransparency = 1,
+			Position = UDim2.new(0, 16, 0, 0),
+			Size = UDim2.new(1, -110, 1, 0),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = TopBar,
+		})
+	end
+
+	-- window control buttons (minimize / maximize / close) -----------
+	local Controls = create("Frame", {
+		BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -10, 0.5, 0),
+		Size = UDim2.new(0, 96, 0, 26),
+		Parent = TopBar,
 	}, {
-		corner(12),
-	})
-	-- cover bottom rounding of topbar so it looks flush with body
-	create("Frame", {
-		BackgroundColor3 = Theme.Secondary,
-		BorderSizePixel = 0,
-		Position = UDim2.new(0, 0, 1, -12),
-		Size = UDim2.new(1, 0, 0, 12),
-		Parent = TopBar,
+		create("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			HorizontalAlignment = Enum.HorizontalAlignment.Right,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+			Padding = UDim.new(0, 4),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
 	})
 
-	create("TextLabel", {
-		Text = windowName,
-		Font = Theme.FontBold,
-		TextSize = 16,
-		TextColor3 = Theme.Text,
-		BackgroundTransparency = 1,
-		Position = UDim2.new(0, 16, 0, 6),
-		Size = UDim2.new(1, -32, 0, 20),
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Parent = TopBar,
-	})
-	create("TextLabel", {
-		Text = subtitle,
-		Font = Theme.Font,
-		TextSize = 12,
-		TextColor3 = Theme.SubText,
-		BackgroundTransparency = 1,
-		Position = UDim2.new(0, 16, 0, 24),
-		Size = UDim2.new(1, -32, 0, 16),
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Parent = TopBar,
-	})
+	local function makeControlButton(text, hoverColor, layoutOrder)
+		local Btn = create("TextButton", {
+			Text = text,
+			Font = Theme.FontBold,
+			TextSize = 15,
+			TextColor3 = Theme.SubText,
+			BackgroundTransparency = 1,
+			Size = UDim2.new(0, 28, 0, 26),
+			LayoutOrder = layoutOrder,
+			Parent = Controls,
+		})
+		Btn.MouseEnter:Connect(function() quickTween(Btn, { TextColor3 = hoverColor }, 0.15) end)
+		Btn.MouseLeave:Connect(function() quickTween(Btn, { TextColor3 = Theme.SubText }, 0.15) end)
+		return Btn
+	end
 
-	-- close button
-	local CloseBtn = create("TextButton", {
-		Text = "×",
-		Font = Theme.FontBold,
-		TextSize = 20,
-		TextColor3 = Theme.SubText,
-		BackgroundTransparency = 1,
-		Size = UDim2.new(0, 32, 0, 32),
-		Position = UDim2.new(1, -40, 0, 7),
-		Parent = TopBar,
-	})
-	CloseBtn.MouseEnter:Connect(function() quickTween(CloseBtn, { TextColor3 = Theme.Error }, 0.15) end)
-	CloseBtn.MouseLeave:Connect(function() quickTween(CloseBtn, { TextColor3 = Theme.SubText }, 0.15) end)
+	local MinimizeBtn = makeControlButton("—", Theme.Accent, 1)
+	local MaximizeBtn = makeControlButton("▢", Theme.Accent, 2)
+	local CloseBtn = makeControlButton("×", Theme.Error, 3)
+	CloseBtn.TextSize = 18
+
+	--------------------------------------------------------------
+	-- MINIMIZE / MAXIMIZE
+	--------------------------------------------------------------
+	local minimized, maximized = false, false
+	local sizeBeforeMinimize = size
+	local sizeBeforeMaximize, posBeforeMaximize = size, nil
+
+	MinimizeBtn.MouseButton1Click:Connect(function()
+		minimized = not minimized
+		if minimized then
+			sizeBeforeMinimize = Main.Size
+			quickTween(Main, { Size = UDim2.new(sizeBeforeMinimize.X.Scale, sizeBeforeMinimize.X.Offset, 0, TOPBAR_HEIGHT) }, 0.28)
+			MinimizeBtn.Text = "+"
+		else
+			quickTween(Main, { Size = sizeBeforeMinimize }, 0.28)
+			MinimizeBtn.Text = "—"
+		end
+	end)
+
+	MaximizeBtn.MouseButton1Click:Connect(function()
+		maximized = not maximized
+		if maximized then
+			sizeBeforeMaximize, posBeforeMaximize = Main.Size, Main.Position
+			minimized = false
+			MinimizeBtn.Text = "—"
+			quickTween(Main, { Size = UDim2.new(1, 0, 1, 0), Position = UDim2.new(0, 0, 0, 0) }, 0.28)
+		else
+			quickTween(Main, { Size = sizeBeforeMaximize, Position = posBeforeMaximize }, 0.28)
+		end
+	end)
+
 	CloseBtn.MouseButton1Click:Connect(function()
-		quickTween(Main, { Size = UDim2.new(0, size.X.Offset * 0.9, 0, size.Y.Offset * 0.9), BackgroundTransparency = 1 }, 0.2)
+		local closeSize = Main.Size
+		quickTween(Main, { Size = UDim2.new(0, closeSize.X.Offset * 0.9, 0, closeSize.Y.Offset * 0.9), BackgroundTransparency = 1 }, 0.2)
 		task.wait(0.2)
 		Main.Visible = false
 	end)
@@ -322,8 +415,8 @@ function CuteWare:CreateWindow(config)
 	local TabList = create("Frame", {
 		Name = "TabList",
 		BackgroundColor3 = Theme.Secondary,
-		Position = UDim2.new(0, 0, 0, 46),
-		Size = UDim2.new(0, 140, 1, -46),
+		Position = UDim2.new(0, 0, 0, TOPBAR_HEIGHT),
+		Size = UDim2.new(0, 140, 1, -TOPBAR_HEIGHT),
 		Parent = Main,
 	}, {
 		create("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }),
@@ -334,8 +427,8 @@ function CuteWare:CreateWindow(config)
 	local ContentArea = create("Frame", {
 		Name = "ContentArea",
 		BackgroundTransparency = 1,
-		Position = UDim2.new(0, 140, 0, 46),
-		Size = UDim2.new(1, -140, 1, -46),
+		Position = UDim2.new(0, 140, 0, TOPBAR_HEIGHT),
+		Size = UDim2.new(1, -140, 1, -TOPBAR_HEIGHT),
 		Parent = Main,
 	})
 
@@ -357,6 +450,9 @@ function CuteWare:CreateWindow(config)
 			Parent = TabList,
 		}, { corner(8) })
 
+		-- UIScale drives the smooth hover "pop" without touching Size directly
+		local TabScale = create("UIScale", { Scale = 1, Parent = TabButton })
+
 		local Page = create("ScrollingFrame", {
 			Name = tabName .. "Page",
 			BackgroundTransparency = 1,
@@ -372,23 +468,32 @@ function CuteWare:CreateWindow(config)
 			create("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder }),
 		})
 
-		local Tab = { Page = Page, Button = TabButton }
+		-- Tab.Active is the single source of truth for "is this tab selected".
+		-- Previously hover logic read TabButton/Page state directly, which
+		-- could desync mid-tween (e.g. rapid clicking) and leave a tab's
+		-- hover/active colors inconsistent. Storing it explicitly on the Tab
+		-- fixes that race.
+		local Tab = { Page = Page, Button = TabButton, Active = false }
 
 		local function selectTab()
 			for _, t in pairs(Window.Tabs) do
+				t.Active = false
 				t.Page.Visible = false
 				quickTween(t.Button, { BackgroundTransparency = 1, TextColor3 = Theme.SubText }, 0.15)
 			end
+			Tab.Active = true
 			Page.Visible = true
 			quickTween(TabButton, { BackgroundTransparency = 0, TextColor3 = Theme.Text }, 0.15)
 		end
 
 		TabButton.MouseButton1Click:Connect(selectTab)
 		TabButton.MouseEnter:Connect(function()
-			if not Page.Visible then quickTween(TabButton, { TextColor3 = Theme.Text }, 0.12) end
+			if not Tab.Active then quickTween(TabButton, { TextColor3 = Theme.Text }, 0.12) end
+			quickTween(TabScale, { Scale = 1.035 }, 0.15)
 		end)
 		TabButton.MouseLeave:Connect(function()
-			if not Page.Visible then quickTween(TabButton, { TextColor3 = Theme.SubText }, 0.12) end
+			if not Tab.Active then quickTween(TabButton, { TextColor3 = Theme.SubText }, 0.12) end
+			quickTween(TabScale, { Scale = 1 }, 0.15)
 		end)
 
 		table.insert(Window.Tabs, Tab)

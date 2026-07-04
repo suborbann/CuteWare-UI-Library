@@ -1,6 +1,5 @@
 --[[
 
-
 ░█████╗░██╗░░░██╗████████╗███████╗░░░░░░░██╗░░░░░░░██╗░█████╗░██████╗░███████╗
 ██╔══██╗██║░░░██║╚══██╔══╝██╔════╝░░░░░░░██║░░██╗░░██║██╔══██╗██╔══██╗██╔════╝
 ██║░░╚═╝██║░░░██║░░░██║░░░█████╗░░█████╗░╚██╗████╗██╔╝███████║██████╔╝█████╗░░
@@ -81,8 +80,6 @@ local function padding(all)
 	})
 end
 
--- HSV <-> Color3 helpers already handled by Color3.fromHSV / Color3:ToHSV()
-
 local function darken(color, factor)
 	factor = factor or 0.85
 	return Color3.new(
@@ -92,12 +89,6 @@ local function darken(color, factor)
 	)
 end
 
--- ClipsDescendants only clips to the RECTANGULAR bounds of a frame, not to
--- the rounded shape a UICorner draws. So an opaque child panel (topbar,
--- tab list) sitting flush against Main's edges will visually square off
--- Main's rounded corners. To fix this we give panels that touch the
--- window's outer edge their OWN UICorner, then mask (flatten) whichever
--- corners are NOT on the outer edge with small same-color squares.
 local function applyPanelCorners(panel, radius, keep)
 	corner(radius).Parent = panel
 	local color = panel.BackgroundColor3
@@ -127,10 +118,9 @@ end
 --------------------------------------------------------------------
 local CuteWare = {}
 CuteWare.__index = CuteWare
-CuteWare.Flags = {} -- stores values of all elements, keyed by Flag name
+CuteWare.Flags = {}
 
 function CuteWare:Init()
-	-- destroy previous instance if re-executed
 	local existing = PlayerGui:FindFirstChild("CuteWare")
 	if existing then existing:Destroy() end
 
@@ -138,12 +128,12 @@ function CuteWare:Init()
 		Name = "CuteWare",
 		ResetOnSpawn = false,
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-		DisplayOrder = 999, -- keeps CuteWare above other ScreenGuis (topmost)
+		DisplayOrder = 999,
 		Parent = PlayerGui,
 	})
 	self.ScreenGui = ScreenGui
 
-	-- Notification holder (top-right stack)
+	-- Notification holder (top-right stack) для обычных нотификаций
 	local NotifHolder = create("Frame", {
 		Name = "Notifications",
 		BackgroundTransparency = 1,
@@ -160,11 +150,28 @@ function CuteWare:Init()
 	})
 	self.NotifHolder = NotifHolder
 
+	-- Notification holder для больших нотификаций (center)
+	local BigNotifHolder = create("Frame", {
+		Name = "BigNotifications",
+		BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		Size = UDim2.new(0, 400, 1, -100),
+		Parent = ScreenGui,
+	}, {
+		create("UIListLayout", {
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Padding = UDim.new(0, 15),
+			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		})
+	})
+	self.BigNotifHolder = BigNotifHolder
+
 	return self
 end
 
 --------------------------------------------------------------------
--- NOTIFICATIONS
+-- NOTIFICATIONS (малые - в углу)
 --------------------------------------------------------------------
 function CuteWare:Notify(config)
 	config = config or {}
@@ -231,12 +238,171 @@ function CuteWare:Notify(config)
 end
 
 --------------------------------------------------------------------
+-- BIG NOTIFICATIONS (большие - в центре экрана)
+--------------------------------------------------------------------
+function CuteWare:NotifyBig(config)
+	config = config or {}
+	local title = config.Title or "Notification"
+	local content = config.Content or ""
+	local duration = config.Duration or 4
+	local buttons = config.Buttons or {} -- массив кнопок: {text, callback}
+	local icon = config.Icon -- Image ID для иконки
+	local iconSide = config.IconSide or 1 -- 1 = слева, 2 = сверху
+
+	local MainFrame = create("Frame", {
+		BackgroundColor3 = Theme.Secondary,
+		Size = UDim2.new(0, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.XY,
+		ClipsDescendants = true,
+		Parent = self.BigNotifHolder,
+	}, {
+		corner(12),
+		stroke(Theme.Accent, 2),
+		padding(20),
+	})
+
+	-- Основной контейнер (горизонтальный или вертикальный в зависимости от iconSide)
+	local ContentContainer = create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(0, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.XY,
+		Parent = MainFrame,
+	})
+
+	local isHorizontal = iconSide == 1
+	create("UIListLayout", {
+		FillDirection = isHorizontal and Enum.FillDirection.Horizontal or Enum.FillDirection.Vertical,
+		Padding = UDim.new(0, 16),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		VerticalAlignment = Enum.VerticalAlignment.Top,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+	}).Parent = ContentContainer
+
+	-- Иконка (если есть)
+	if icon then
+		local IconFrame = create("Frame", {
+			BackgroundTransparency = 1,
+			Size = UDim2.new(0, 60, 0, 60),
+			LayoutOrder = 1,
+			Parent = ContentContainer,
+		})
+		create("ImageLabel", {
+			Image = type(icon) == "number" and ("rbxassetid://" .. icon) or tostring(icon),
+			BackgroundTransparency = 0.3,
+			BackgroundColor3 = Theme.Tertiary,
+			Size = UDim2.new(1, 0, 1, 0),
+			Parent = IconFrame,
+		}, { corner(10) })
+	end
+
+	-- Текстовый контейнер
+	local TextContainer = create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(0, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.XY,
+		LayoutOrder = 2,
+		Parent = ContentContainer,
+	}, {
+		create("UIListLayout", {
+			Padding = UDim.new(0, 8),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		})
+	})
+
+	create("TextLabel", {
+		Text = title,
+		Font = Theme.FontBold,
+		TextSize = 18,
+		TextColor3 = Theme.Text,
+		BackgroundTransparency = 1,
+		Size = UDim2.new(0, 250, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		LayoutOrder = 1,
+		Parent = TextContainer,
+	})
+
+	create("TextLabel", {
+		Text = content,
+		Font = Theme.Font,
+		TextSize = 14,
+		TextColor3 = Theme.SubText,
+		BackgroundTransparency = 1,
+		Size = UDim2.new(0, 250, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		LayoutOrder = 2,
+		Parent = TextContainer,
+	})
+
+	-- Кнопки (если есть)
+	if #buttons > 0 then
+		local ButtonsFrame = create("Frame", {
+			BackgroundTransparency = 1,
+			Size = UDim2.new(0, 0, 0, 0),
+			AutomaticSize = Enum.AutomaticSize.XY,
+			LayoutOrder = 3,
+			Parent = TextContainer,
+		}, {
+			create("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				Padding = UDim.new(0, 10),
+				SortOrder = Enum.SortOrder.LayoutOrder,
+			})
+		})
+
+		for i, btn in ipairs(buttons) do
+			local BtnInst = create("TextButton", {
+				Text = btn.text or "Button",
+				Font = Theme.Font,
+				TextSize = 13,
+				TextColor3 = Theme.Text,
+				BackgroundColor3 = Theme.Accent,
+				Size = UDim2.new(0, 80, 0, 32),
+				LayoutOrder = i,
+				Parent = ButtonsFrame,
+			}, { corner(6) })
+
+			BtnInst.MouseButton1Click:Connect(function()
+				if btn.callback then btn.callback() end
+				MainFrame:Destroy()
+			end)
+		end
+	end
+
+	-- Анимация появления
+	MainFrame.BackgroundTransparency = 1
+	MainFrame.Size = UDim2.new(0, 0, 0, 0)
+	quickTween(MainFrame, { BackgroundTransparency = 0, Size = MainFrame.Size }, 0.3)
+	for _, d in ipairs(MainFrame:GetDescendants()) do
+		if d:IsA("TextLabel") then d.TextTransparency = 1 end
+		if d:IsA("UIStroke") then d.Transparency = 1 end
+	end
+	for _, d in ipairs(MainFrame:GetDescendants()) do
+		if d:IsA("TextLabel") then quickTween(d, { TextTransparency = 0 }, 0.3) end
+		if d:IsA("UIStroke") then quickTween(d, { Transparency = 0 }, 0.3) end
+	end
+
+	task.delay(duration, function()
+		quickTween(MainFrame, { BackgroundTransparency = 1 }, 0.25)
+		for _, d in ipairs(MainFrame:GetDescendants()) do
+			if d:IsA("TextLabel") then quickTween(d, { TextTransparency = 1 }, 0.25) end
+			if d:IsA("UIStroke") then quickTween(d, { Transparency = 1 }, 0.25) end
+		end
+		task.wait(0.3)
+		MainFrame:Destroy()
+	end)
+end
+
+--------------------------------------------------------------------
 -- WINDOW
 --------------------------------------------------------------------
 function CuteWare:CreateWindow(config)
 	config = config or {}
 	local windowName = config.Name or "CuteWare"
-	local subtitle = config.Subtitle -- can be nil now
+	local subtitle = config.Subtitle
 	local size = config.Size or UDim2.new(0, 560, 0, 380)
 	local backgroundImage = config.BackgroundImage
 	local backgroundTransparency = config.BackgroundImageTransparency or 0.75
@@ -298,8 +464,6 @@ function CuteWare:CreateWindow(config)
 		Size = UDim2.new(1, 0, 0, TOPBAR_HEIGHT),
 		Parent = Main,
 	})
-	-- Top corners always rounded; bottom corners masked flat normally, but
-	-- revealed (rounded) when minimized since the topbar becomes the whole window.
 	local topBarMasks = applyPanelCorners(TopBar, 12, { TopLeft = true, TopRight = true, BottomLeft = false, BottomRight = false })
 
 	if subtitle and subtitle ~= "" then
@@ -377,45 +541,46 @@ function CuteWare:CreateWindow(config)
 		return Btn
 	end
 
-	local MinimizeBtn = makeControlButton("—", darken(Theme.Tertiary, 0.9), Theme.Accent, 1)
-	local MaximizeBtn = makeControlButton("▢", darken(Theme.Tertiary, 0.9), Theme.Accent, 2)
-	local CloseBtn = makeControlButton("×", darken(Theme.Error, 0.5), Theme.Text, 3)
+	local MinimizeBtn = makeControlButton("_", darken(Theme.Tertiary, 0.9), Theme.Accent, 1)
+	local MaximizeBtn = makeControlButton("□", darken(Theme.Tertiary, 0.9), Theme.Accent, 2)
+	local CloseBtn = makeControlButton("⊗", darken(Theme.Error, 0.5), Theme.Text, 3)
 
 	--------------------------------------------------------------
 	-- MINIMIZE / MAXIMIZE
 	--------------------------------------------------------------
-	-- IMPORTANT: we track the window's "restored" size/position in plain
-	-- variables (windowSize / windowPos) instead of reading Main.Size /
-	-- Main.Position at click time. Reading those properties directly was the
-	-- actual bug behind "minimize doesn't open back up": if you clicked
-	-- while a tween was still mid-flight, you'd read a PARTIAL, in-between
-	-- value and store that as the size/position to restore to, so the
-	-- "restore" tween would animate to a wrong (sometimes near-zero) size.
 	local minimized, maximized = false, false
 	local windowSize = size
 	local windowPos = Main.Position
+	local TabListShell -- объявляем здесь чтобы использовать в minimize
 
 	local function setMinimizedVisual(isMin)
 		topBarMasks.MaskBL.Visible = not isMin
 		topBarMasks.MaskBR.Visible = not isMin
-		MinimizeBtn.Text = isMin and "+" or "—"
+		MinimizeBtn.Text = isMin and "▲" or "_"
 	end
 
-	local clearDragTarget -- assigned once dragging is set up below
+	local clearDragTarget
 
 	local function restoreFromMaximize()
 		maximized = false
-		MaximizeBtn.Text = "▢"
+		MaximizeBtn.Text = "□"
 		quickTween(Main, { Size = windowSize, Position = windowPos }, 0.28)
 	end
 
 	MinimizeBtn.MouseButton1Click:Connect(function()
-		if maximized then return end -- restore from maximize first
+		if maximized then return end
 		minimized = not minimized
 		if clearDragTarget then clearDragTarget() end
+		
 		if minimized then
-			quickTween(Main, { Size = UDim2.new(windowSize.X.Scale, windowSize.X.Offset, 0, TOPBAR_HEIGHT) }, 0.28)
+			-- Minimize: уменьшается в ширину И в высоту, остается только топбар и кнопки
+			TabListShell.Visible = false
+			ContentArea.Visible = false
+			quickTween(Main, { Size = UDim2.new(0, 160, 0, TOPBAR_HEIGHT) }, 0.28)
 		else
+			-- Restore: возвращается к оригинальному размеру
+			TabListShell.Visible = true
+			ContentArea.Visible = true
 			quickTween(Main, { Size = windowSize }, 0.28)
 		end
 		setMinimizedVisual(minimized)
@@ -426,6 +591,8 @@ function CuteWare:CreateWindow(config)
 		if not maximized then
 			if minimized then
 				minimized = false
+				TabListShell.Visible = true
+				ContentArea.Visible = true
 				setMinimizedVisual(false)
 			end
 			maximized = true
@@ -443,7 +610,7 @@ function CuteWare:CreateWindow(config)
 	end)
 
 	--------------------------------------------------------------
-	-- SMOOTH DRAGGING (tween-based, snappy but not instant)
+	-- SMOOTH DRAGGING
 	--------------------------------------------------------------
 	do
 		local dragging = false
@@ -451,10 +618,6 @@ function CuteWare:CreateWindow(config)
 		local targetPos
 
 		clearDragTarget = function()
-			-- Without this, the RenderStepped loop below kept easing Main
-			-- toward a stale targetPos left over from the last drag, which
-			-- yanked the window back to its old spot right after
-			-- maximize/minimize played their tween.
 			targetPos = nil
 			dragging = false
 		end
@@ -466,11 +629,9 @@ function CuteWare:CreateWindow(config)
 
 		TopBar.InputBegan:Connect(function(input)
 			if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
-			if isOverControls(input.Position) then return end -- don't start a drag from the buttons
+			if isOverControls(input.Position) then return end
 
 			if maximized then
-				-- clicking the topbar of a maximized window restores it,
-				-- as requested, instead of trying to drag a fullscreen window
 				restoreFromMaximize()
 				return
 			end
@@ -497,7 +658,6 @@ function CuteWare:CreateWindow(config)
 			end
 		end)
 
-		-- smoothing loop: eases Main.Position toward targetPos each frame (fast but fluid)
 		RunService.RenderStepped:Connect(function(dt)
 			if targetPos and not maximized then
 				Main.Position = Main.Position:Lerp(targetPos, math.clamp(dt * 16, 0, 1))
@@ -507,21 +667,13 @@ function CuteWare:CreateWindow(config)
 	end
 
 	-- TAB LIST (left side) -------------------------------------------
-	-- Split into a Shell (holds the rounded background + corner masks) and
-	-- an inner content frame (holds the UIListLayout for tab buttons).
-	-- Keeping them separate matters: UIListLayout repositions EVERY sibling
-	-- GuiObject in its parent, so if the corner-mask squares lived directly
-	-- inside the same frame as the tab buttons' UIListLayout, they'd get
-	-- sucked into the list and rendered as extra rows instead of sitting in
-	-- the corners.
-	local TabListShell = create("Frame", {
+	TabListShell = create("Frame", {
 		Name = "TabListShell",
 		BackgroundColor3 = Theme.Secondary,
 		Position = UDim2.new(0, 0, 0, TOPBAR_HEIGHT),
 		Size = UDim2.new(0, 140, 1, -TOPBAR_HEIGHT),
 		Parent = Main,
 	})
-	-- Only its bottom-left corner touches the window's outer edge
 	applyPanelCorners(TabListShell, 12, { TopLeft = false, TopRight = false, BottomLeft = true, BottomRight = false })
 
 	local TabList = create("Frame", {
@@ -561,7 +713,6 @@ function CuteWare:CreateWindow(config)
 			Parent = TabList,
 		}, { corner(8) })
 
-		-- UIScale drives the smooth hover "pop" without touching Size directly
 		local TabScale = create("UIScale", { Scale = 1, Parent = TabButton })
 
 		local Page = create("ScrollingFrame", {
@@ -578,11 +729,6 @@ function CuteWare:CreateWindow(config)
 			create("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder }),
 		})
 
-		-- Manual canvas sizing instead of AutomaticCanvasSize: some Roblox
-		-- builds/executors don't expose that enum member at all (that's what
-		-- threw "AutomaticCanvasSize is not a valid member of Enum"), so we
-		-- just resize the canvas ourselves whenever the list layout's content
-		-- size changes.
 		local PageLayout = Page:FindFirstChildOfClass("UIListLayout")
 		local function updateCanvas()
 			Page.CanvasSize = UDim2.new(0, 0, 0, PageLayout.AbsoluteContentSize.Y + 28)
@@ -590,11 +736,6 @@ function CuteWare:CreateWindow(config)
 		PageLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateCanvas)
 		updateCanvas()
 
-		-- Tab.Active is the single source of truth for "is this tab selected".
-		-- Previously hover logic read TabButton/Page state directly, which
-		-- could desync mid-tween (e.g. rapid clicking) and leave a tab's
-		-- hover/active colors inconsistent. Storing it explicitly on the Tab
-		-- fixes that race.
 		local Tab = { Page = Page, Button = TabButton, Active = false }
 
 		local function selectTab()
@@ -622,7 +763,7 @@ function CuteWare:CreateWindow(config)
 		if #Window.Tabs == 1 then selectTab() end
 
 		----------------------------------------------------------
-		-- SECTION (with title text)
+		-- SECTION
 		----------------------------------------------------------
 		function Tab:CreateSection(name)
 			local SectionHolder = create("Frame", {
@@ -677,7 +818,7 @@ function CuteWare:CreateWindow(config)
 			end
 
 			------------------------------------------------------
-			-- TOGGLE
+			-- TOGGLE (квадратный с округлыми краями)
 			------------------------------------------------------
 			function Section:CreateToggle(togConfig)
 				togConfig = togConfig or {}
@@ -700,26 +841,27 @@ function CuteWare:CreateWindow(config)
 					Parent = Holder,
 				})
 
+				-- Квадратный с округлыми краями (не полный круг)
 				local Switch = create("Frame", {
 					BackgroundColor3 = state and Theme.Accent or Theme.Tertiary,
-					Size = UDim2.new(0, 42, 0, 22),
-					Position = UDim2.new(1, -42, 0.5, -11),
+					Size = UDim2.new(0, 48, 0, 24),
+					Position = UDim2.new(1, -48, 0.5, -12),
 					Parent = Holder,
-				}, { corner(11) })
+				}, { corner(6) })
 
 				local Knob = create("Frame", {
 					BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-					Size = UDim2.new(0, 18, 0, 18),
-					Position = state and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9),
+					Size = UDim2.new(0, 20, 0, 20),
+					Position = state and UDim2.new(1, -22, 0.5, -10) or UDim2.new(0, 2, 0.5, -10),
 					Parent = Switch,
-				}, { corner(9) })
+				}, { corner(4) })
 
 				local Click = create("TextButton", { BackgroundTransparency = 1, Text = "", Size = UDim2.new(1, 0, 1, 0), Parent = Holder })
 
 				local function set(newState, fire)
 					state = newState
 					quickTween(Switch, { BackgroundColor3 = state and Theme.Accent or Theme.Tertiary }, 0.18)
-					quickTween(Knob, { Position = state and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9) }, 0.18)
+					quickTween(Knob, { Position = state and UDim2.new(1, -22, 0.5, -10) or UDim2.new(0, 2, 0.5, -10) }, 0.18)
 					if flag then CuteWare.Flags[flag] = state end
 					if fire ~= false and togConfig.Callback then togConfig.Callback(state) end
 				end
@@ -730,7 +872,7 @@ function CuteWare:CreateWindow(config)
 			end
 
 			------------------------------------------------------
-			-- SLIDER
+			-- SLIDER (исправленный синхрон кнопки и полоски)
 			------------------------------------------------------
 			function Section:CreateSlider(sldConfig)
 				sldConfig = sldConfig or {}
@@ -780,12 +922,13 @@ function CuteWare:CreateWindow(config)
 					Parent = Bar,
 				}, { corner(4) })
 
+				-- Knob ВНУТРИ Bar (не Fill), поэтому не будет отставать
 				local Knob = create("Frame", {
 					BackgroundColor3 = Color3.fromRGB(255, 255, 255),
 					AnchorPoint = Vector2.new(0.5, 0.5),
 					Size = UDim2.new(0, 14, 0, 14),
 					Position = UDim2.new((value - min) / (max - min), 0, 0.5, 0),
-					Parent = Fill,
+					Parent = Bar,
 				}, { corner(7) })
 
 				local dragging = false
@@ -796,6 +939,7 @@ function CuteWare:CreateWindow(config)
 					raw = math.clamp(raw, min, max)
 					value = raw
 					quickTween(Fill, { Size = UDim2.new((value - min) / (max - min), 0, 1, 0) }, 0.05)
+					quickTween(Knob, { Position = UDim2.new((value - min) / (max - min), 0, 0.5, 0) }, 0.05)
 					ValueLabel.Text = tostring(value)
 					if flag then CuteWare.Flags[flag] = value end
 					if sldConfig.Callback then sldConfig.Callback(value) end
@@ -860,7 +1004,7 @@ function CuteWare:CreateWindow(config)
 					Parent = Holder,
 				}, { corner(8) })
 				Box.MouseEnter:Connect(function() quickTween(Box, { BackgroundColor3 = darken(Theme.Tertiary, 0.75) }, 0.15) end)
-				Box.MouseLeave:Connect(function() quickTween(Box, { BackgroundColor3 = Theme.Tertiary }, 0.15) end)
+				Box.MouseLeave:Connect(function() if not open then quickTween(Box, { BackgroundColor3 = Theme.Tertiary }, 0.15) end end)
 
 				local SelectedLabel = create("TextLabel", {
 					Text = tostring(current or "None"),
@@ -876,9 +1020,9 @@ function CuteWare:CreateWindow(config)
 				})
 
 				local Arrow = create("TextLabel", {
-					Text = "▾",
+					Text = "▼",
 					Font = Theme.Font,
-					TextSize = 14,
+					TextSize = 12,
 					TextColor3 = Theme.SubText,
 					BackgroundTransparency = 1,
 					Size = UDim2.new(0, 24, 1, 0),
@@ -891,6 +1035,7 @@ function CuteWare:CreateWindow(config)
 					Position = UDim2.new(0, 0, 0, 58),
 					Size = UDim2.new(1, 0, 0, 0),
 					Parent = Holder,
+					ClipsDescendants = true,
 				}, {
 					corner(8),
 					create("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }),
@@ -916,11 +1061,6 @@ function CuteWare:CreateWindow(config)
 
 				local optionButtons = {}
 				for i, opt in ipairs(options) do
-					-- was: (not multi and opt == current) or (multi and selectedSet[opt]) and Theme.Accent or Theme.SubText
-					-- classic Lua "ternary" trap: if the first `A or B` term evaluates
-					-- to the boolean `true`, the whole chain short-circuits to `true`
-					-- (a boolean) instead of ever reaching Theme.Accent/Theme.SubText,
-					-- which is exactly what threw "Color3 expected got boolean".
 					local isSelected = multi and selectedSet[opt] or (not multi and opt == current)
 					local OptBtn = create("TextButton", {
 						Text = tostring(opt),
@@ -951,6 +1091,7 @@ function CuteWare:CreateWindow(config)
 							OptBtn.TextColor3 = Theme.Accent
 							if flag then CuteWare.Flags[flag] = current end
 							if ddConfig.Callback then ddConfig.Callback(current) end
+							-- НЕ ЗАКРЫВАЕМ DROPDOWN СРАЗУ, чтобы пользователь видел выбранный элемент
 						end
 					end)
 					table.insert(optionButtons, OptBtn)
@@ -961,6 +1102,11 @@ function CuteWare:CreateWindow(config)
 					open = not open
 					quickTween(Arrow, { Rotation = open and 180 or 0 }, 0.2)
 					quickTween(OptionList, { Size = UDim2.new(1, 0, 0, open and optionHeight or 0) }, 0.2)
+					if open then
+						quickTween(Box, { BackgroundColor3 = darken(Theme.Tertiary, 0.75) }, 0.15)
+					else
+						quickTween(Box, { BackgroundColor3 = Theme.Tertiary }, 0.15)
+					end
 				end)
 
 				if flag then CuteWare.Flags[flag] = multi and current or current end
@@ -968,7 +1114,7 @@ function CuteWare:CreateWindow(config)
 			end
 
 			------------------------------------------------------
-			-- COLOR PICKER
+			-- COLOR PICKER (основной - SV + Hue slider слева)
 			------------------------------------------------------
 			function Section:CreateColorPicker(cpConfig)
 				cpConfig = cpConfig or {}
@@ -1016,26 +1162,10 @@ function CuteWare:CreateWindow(config)
 					Parent = Holder,
 				})
 
-				-- Saturation/Value box
-				local SVBox = create("ImageLabel", {
-					Image = "rbxassetid://4155801252", -- standard SV gradient
-					BackgroundColor3 = Color3.fromHSV(h, 1, 1),
-					Size = UDim2.new(0, 130, 0, 130),
-					Parent = Picker,
-				}, { corner(8) })
-
-				local SVCursor = create("Frame", {
-					AnchorPoint = Vector2.new(0.5, 0.5),
-					Size = UDim2.new(0, 10, 0, 10),
-					BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-					Position = UDim2.new(s, 0, 1 - v, 0),
-					Parent = SVBox,
-				}, { corner(5), stroke(Color3.fromRGB(0, 0, 0), 1) })
-
-				-- Hue slider
+				-- Hue slider СЛЕВА
 				local HueBar = create("Frame", {
-					Position = UDim2.new(0, 146, 0, 0),
-					Size = UDim2.new(1, -146, 0, 20),
+					Position = UDim2.new(0, 0, 0, 0),
+					Size = UDim2.new(0, 20, 0, 130),
 					Parent = Picker,
 				}, { corner(6) })
 
@@ -1049,18 +1179,34 @@ function CuteWare:CreateWindow(config)
 						ColorSequenceKeypoint.new(0.83, Color3.fromRGB(255, 0, 255)),
 						ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 0, 0)),
 					}),
-					Rotation = 90,
+					Rotation = 0,
 				})
 				hueGradient.Parent = HueBar
-				corner(6).Parent = HueBar
 
 				local HueCursor = create("Frame", {
 					AnchorPoint = Vector2.new(0.5, 0.5),
-					Size = UDim2.new(1, 4, 0, 4),
+					Size = UDim2.new(0, 4, 1, 4),
 					BackgroundColor3 = Color3.fromRGB(255, 255, 255),
 					Position = UDim2.new(0.5, 0, h, 0),
 					Parent = HueBar,
 				}, { corner(2), stroke(Color3.fromRGB(0, 0, 0), 1) })
+
+				-- Saturation/Value box СПРАВА
+				local SVBox = create("ImageLabel", {
+					Image = "rbxassetid://4155801252",
+					BackgroundColor3 = Color3.fromHSV(h, 1, 1),
+					Size = UDim2.new(1, -28, 0, 130),
+					Position = UDim2.new(0, 26, 0, 0),
+					Parent = Picker,
+				}, { corner(8) })
+
+				local SVCursor = create("Frame", {
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					Size = UDim2.new(0, 10, 0, 10),
+					BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+					Position = UDim2.new(s, 0, 1 - v, 0),
+					Parent = SVBox,
+				}, { corner(5), stroke(Color3.fromRGB(0, 0, 0), 1) })
 
 				local function updateColor()
 					color = Color3.fromHSV(h, s, v)
@@ -1110,7 +1256,158 @@ function CuteWare:CreateWindow(config)
 			end
 
 			------------------------------------------------------
-			-- TEXTBOX (input)
+			-- COLOR PICKER 2 (дополнительный - полная радуга слева + SV справа)
+			------------------------------------------------------
+			function Section:CreateColorPicker2(cpConfig)
+				cpConfig = cpConfig or {}
+				local color = cpConfig.CurrentColor or Color3.fromRGB(255, 255, 255)
+				local flag = cpConfig.Flag
+				local open = false
+				local h, s, v = color:ToHSV()
+
+				local Holder = create("Frame", {
+					BackgroundTransparency = 1,
+					Size = UDim2.new(1, 0, 0, 0),
+					AutomaticSize = Enum.AutomaticSize.Y,
+					ClipsDescendants = true,
+					Parent = SectionHolder,
+				})
+
+				local Header = create("Frame", {
+					BackgroundTransparency = 1,
+					Size = UDim2.new(1, 0, 0, 30),
+					Parent = Holder,
+				})
+				create("TextLabel", {
+					Text = cpConfig.Name or "Color",
+					Font = Theme.Font,
+					TextSize = 13,
+					TextColor3 = Theme.Text,
+					BackgroundTransparency = 1,
+					Size = UDim2.new(1, -40, 1, 0),
+					TextXAlignment = Enum.TextXAlignment.Left,
+					Parent = Header,
+				})
+
+				local Preview = create("TextButton", {
+					Text = "",
+					BackgroundColor3 = color,
+					Size = UDim2.new(0, 28, 0, 20),
+					Position = UDim2.new(1, -28, 0.5, -10),
+					Parent = Header,
+				}, { corner(6), stroke(Theme.Stroke, 1) })
+
+				local Picker = create("Frame", {
+					BackgroundTransparency = 1,
+					Position = UDim2.new(0, 0, 0, 34),
+					Size = UDim2.new(1, 0, 0, 200),
+					Parent = Holder,
+				})
+
+				-- Большой Hue wheel (радуга) СЛЕВА
+				local HueWheel = create("Frame", {
+					Position = UDim2.new(0, 0, 0, 0),
+					Size = UDim2.new(0, 180, 0, 180),
+					Parent = Picker,
+				}, { corner(10) })
+
+				-- Для радуги используем градиент с быстрым переходом по цветам
+				local wheelGradient = create("UIGradient", {
+					Color = ColorSequence.new({
+						ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 0, 0)),
+						ColorSequenceKeypoint.new(0.14, Color3.fromRGB(255, 255, 0)),
+						ColorSequenceKeypoint.new(0.28, Color3.fromRGB(0, 255, 0)),
+						ColorSequenceKeypoint.new(0.42, Color3.fromRGB(0, 255, 255)),
+						ColorSequenceKeypoint.new(0.57, Color3.fromRGB(0, 0, 255)),
+						ColorSequenceKeypoint.new(0.71, Color3.fromRGB(255, 0, 255)),
+						ColorSequenceKeypoint.new(0.85, Color3.fromRGB(255, 100, 150)),
+						ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 0, 0)),
+					}),
+					Rotation = 90,
+				})
+				wheelGradient.Parent = HueWheel
+
+				-- Cursor на колесе
+				local HueWheelCursor = create("Frame", {
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					Size = UDim2.new(0, 12, 0, 12),
+					BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+					Position = UDim2.new(0.5 + math.cos((h - 0.5) * math.pi * 2) * (h * 0.4), 0, 0.5 + math.sin((h - 0.5) * math.pi * 2) * (h * 0.4), 0),
+					Parent = HueWheel,
+				}, { corner(6), stroke(Color3.fromRGB(0, 0, 0), 1) })
+
+				-- Saturation/Value box СПРАВА (большой, в полный рост)
+				local SVBox = create("ImageLabel", {
+					Image = "rbxassetid://4155801252",
+					BackgroundColor3 = Color3.fromHSV(h, 1, 1),
+					Size = UDim2.new(1, -196, 0, 180),
+					Position = UDim2.new(0, 186, 0, 0),
+					Parent = Picker,
+				}, { corner(8) })
+
+				local SVCursor = create("Frame", {
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					Size = UDim2.new(0, 10, 0, 10),
+					BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+					Position = UDim2.new(s, 0, 1 - v, 0),
+					Parent = SVBox,
+				}, { corner(5), stroke(Color3.fromRGB(0, 0, 0), 1) })
+
+				local function updateColor()
+					color = Color3.fromHSV(h, s, v)
+					Preview.BackgroundColor3 = color
+					SVBox.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+					if flag then CuteWare.Flags[flag] = color end
+					if cpConfig.Callback then cpConfig.Callback(color) end
+				end
+
+				local draggingSV, draggingHueWheel = false, false
+
+				HueWheel.InputBegan:Connect(function(input)
+					if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then draggingHueWheel = true end
+				end)
+				SVBox.InputBegan:Connect(function(input)
+					if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then draggingSV = true end
+				end)
+
+				UserInputService.InputEnded:Connect(function(input)
+					if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+						draggingSV, draggingHueWheel = false, false
+					end
+				end)
+
+				UserInputService.InputChanged:Connect(function(input)
+					if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then return end
+					
+					if draggingHueWheel then
+						local centerX = HueWheel.AbsolutePosition.X + HueWheel.AbsoluteSize.X / 2
+						local centerY = HueWheel.AbsolutePosition.Y + HueWheel.AbsoluteSize.Y / 2
+						local deltaX = input.Position.X - centerX
+						local deltaY = input.Position.Y - centerY
+						h = (math.atan2(deltaY, deltaX) / (math.pi * 2) + 1) % 1
+						HueWheelCursor.Position = UDim2.new(0.5 + math.cos((h - 0.5) * math.pi * 2) * 0.35, 0, 0.5 + math.sin((h - 0.5) * math.pi * 2) * 0.35, 0)
+						updateColor()
+					elseif draggingSV then
+						local relX = math.clamp((input.Position.X - SVBox.AbsolutePosition.X) / SVBox.AbsoluteSize.X, 0, 1)
+						local relY = math.clamp((input.Position.Y - SVBox.AbsolutePosition.Y) / SVBox.AbsoluteSize.Y, 0, 1)
+						s, v = relX, 1 - relY
+						SVCursor.Position = UDim2.new(s, 0, 1 - v, 0)
+						updateColor()
+					end
+				end)
+
+				Preview.MouseButton1Click:Connect(function()
+					open = not open
+					quickTween(Picker, { Size = UDim2.new(1, 0, 0, open and 200 or 0) }, 0.2)
+				end)
+				Picker.Size = UDim2.new(1, 0, 0, 0)
+
+				if flag then CuteWare.Flags[flag] = color end
+				return Holder
+			end
+
+			------------------------------------------------------
+			-- TEXTBOX
 			------------------------------------------------------
 			function Section:CreateTextbox(tbConfig)
 				tbConfig = tbConfig or {}
@@ -1225,7 +1522,7 @@ function CuteWare:CreateWindow(config)
 			end
 
 			------------------------------------------------------
-			-- LABEL / PARAGRAPH (simple text, e.g. for section descriptions)
+			-- LABEL
 			------------------------------------------------------
 			function Section:CreateLabel(text)
 				return create("TextLabel", {

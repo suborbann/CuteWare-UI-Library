@@ -9,13 +9,13 @@
                                                https://dsc.gg/cuteware
 --]]
 
-local TweenService    = game:GetService("TweenService")
+local TweenService     = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
-local Players         = game:GetService("Players")
-local RunService      = game:GetService("RunService")
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
-local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
+local PlayerGui    = LocalPlayer:WaitForChild("PlayerGui")
 
 --------------------------------------------------------------------
 -- THEME
@@ -61,9 +61,16 @@ local function darken(c, f)
 	f = f or 0.85
 	return Color3.new(math.clamp(c.R*f,0,1), math.clamp(c.G*f,0,1), math.clamp(c.B*f,0,1))
 end
+-- Picks black or white text depending on background luminance, so text/icons
+-- drawn on top of an arbitrary user-picked color (color picker swatch) stay readable.
+local function getContrastText(color)
+	local lum = 0.299*color.R + 0.587*color.G + 0.114*color.B
+	return lum > 0.6 and Color3.fromRGB(25,25,25) or Color3.fromRGB(255,255,255)
+end
 
 -- Applies UICorner and square masks so a panel flush against the
--- window edge doesn't visually cut the window's rounded corners.
+-- window edge doesn't visually cut the window's rounded corners
+-- (ClipsDescendants only clips to a rectangle, not to the UICorner shape).
 local function applyPanelCorners(panel, radius, keep)
 	corner(radius).Parent = panel
 	local col = panel.BackgroundColor3
@@ -83,20 +90,99 @@ local function applyPanelCorners(panel, radius, keep)
 	return masks
 end
 
+-- Resolves a background/icon source into something an ImageLabel can use.
+-- Accepts: a numeric asset id, a "rbxassetid://..." string, or a raw
+-- "http(s)://..." link. Roblox Image* instances can ONLY display Roblox
+-- assets (rbxassetid/rbxthumb) — they cannot stream an arbitrary web image
+-- directly. For http(s) links we try the common executor pattern of
+-- downloading the bytes and handing them to the client via
+-- writefile + getcustomasset, which is what Synapse X/Script-Ware/etc.
+-- expose for exactly this. If those functions aren't available we warn
+-- once and skip the image instead of throwing.
+local imageCache = {}
+local function resolveImage(source)
+	if source == nil or source == "" then return nil end
+	if typeof(source) == "number" then
+		return "rbxassetid://" .. source
+	end
+	source = tostring(source)
+	if source:match("^rbxassetid://") or source:match("^rbxthumb://") then
+		return source
+	end
+	if source:match("^https?://") then
+		if imageCache[source] then return imageCache[source] end
+		local ok, result = pcall(function()
+			if writefile and getcustomasset then
+				local fileName = "cuteware_img_" .. tostring(#source) .. ".png"
+				if not (isfile and isfile(fileName)) then
+					local bytes = game:HttpGet(source)
+					writefile(fileName, bytes)
+				end
+				return getcustomasset(fileName)
+			end
+			return nil
+		end)
+		if ok and result then
+			imageCache[source] = result
+			return result
+		end
+		warn("[CuteWare] This executor can't load images directly from a URL (needs writefile + getcustomasset). Upload the image to Roblox and use its asset id instead.")
+		return nil
+	end
+	-- assume it's a raw numeric-looking id passed as a string
+	return "rbxassetid://" .. source
+end
+
+-- Material-style ripple: a circle grows from the click point to fill the
+-- button, then fades. Used for the "click makes a color wipe across the
+-- tab" animation.
+local function spawnRipple(button, x, y, color, fillDuration)
+	fillDuration = fillDuration or 0.4
+	local w, h = button.AbsoluteSize.X, button.AbsoluteSize.Y
+	local diameter = math.sqrt(w*w + h*h) * 2.2
+	local circle = create("Frame", {
+		BackgroundColor3 = color,
+		BackgroundTransparency = 0,
+		Size = UDim2.new(0, 0, 0, 0),
+		Position = UDim2.new(0, x, 0, y),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		ZIndex = (button.ZIndex or 1) + 1,
+		Parent = button,
+	}, { corner(9999) })
+	tween(circle, TweenInfo.new(fillDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = UDim2.new(0, diameter, 0, diameter),
+	})
+	task.delay(fillDuration, function()
+		if circle and circle.Parent then circle:Destroy() end
+	end)
+end
+
+-- Named keybinds available for the "menu toggle key" setting.
+local KeybindOptions = { "RCtrl", "F", "RShift", "RAlt", "LAlt", "K", "M" }
+local KeybindMap = {
+	RCtrl  = Enum.KeyCode.RightControl,
+	F      = Enum.KeyCode.F,
+	RShift = Enum.KeyCode.RightShift,
+	RAlt   = Enum.KeyCode.RightAlt,
+	LAlt   = Enum.KeyCode.LeftAlt,
+	K      = Enum.KeyCode.K,
+	M      = Enum.KeyCode.M,
+}
+
 --------------------------------------------------------------------
 -- LIBRARY ROOT
 --------------------------------------------------------------------
 local CuteWare = {}
 CuteWare.__index = CuteWare
 
--- CuteWare.Flags  – stores current values of all flagged elements.
---                   Key = Flag string you pass to each element.
+-- CuteWare.Flags – stores current values of all flagged elements.
+--                  Key = Flag string you pass to each element.
 CuteWare.Flags = {}
 
 --------------------------------------------------------------------
 -- CuteWare:Init()
--- Must be called once before CreateWindow().
--- Destroys any previous CuteWare ScreenGui on re-execution.
+-- Must be called once before CreateWindow(). Destroys any previous
+-- CuteWare ScreenGui on re-execution.
 --------------------------------------------------------------------
 function CuteWare:Init()
 	local ex = PlayerGui:FindFirstChild("CuteWare")
@@ -109,8 +195,6 @@ function CuteWare:Init()
 	})
 	self.ScreenGui = sg
 
-	-- Small notification stack (top-right by default, configurable per call)
-	-- Holders for both positions; only one is used per Notify call.
 	self._notifHolderTR = create("Frame", {
 		Name="NotifTR", BackgroundTransparency=1,
 		AnchorPoint=Vector2.new(1,0),
@@ -127,21 +211,137 @@ function CuteWare:Init()
 		Parent=sg,
 	}, { create("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,10),VerticalAlignment=Enum.VerticalAlignment.Bottom,HorizontalAlignment=Enum.HorizontalAlignment.Right}) })
 
-	-- Reference to current window Main frame so NotifyBig can attach to it
 	self._mainFrame = nil
 
 	return self
 end
 
 --------------------------------------------------------------------
--- CuteWare:Notify(config)
--- Shows a small toast notification.
+-- CuteWare:CreateKeySystem(config)
+-- Optional whitelist-key gate. Call it BEFORE CreateWindow(); it blocks
+-- (yields) until a correct key is submitted, then lets your script
+-- continue to CreateWindow(). If config.Enabled is false, it returns
+-- immediately (true) — this is your on/off "setting".
+--
 -- config = {
---   Title    = string,              -- notification header
---   Content  = string,              -- body text
---   Duration = number,              -- seconds before auto-dismiss (default 4)
---   Position = "TopRight"|"BottomRight"  -- where to appear (default TopRight)
+--   Enabled = true|false,
+--   Key     = "mykey123" | {"key1","key2"},  -- accepted key(s)
+--   Title   = string,
+--   Note    = string,  -- e.g. where to get a key
 -- }
+--------------------------------------------------------------------
+function CuteWare:CreateKeySystem(config)
+	config = config or {}
+	if not config.Enabled then return true end
+
+	local validKeys = {}
+	if type(config.Key) == "table" then
+		for _, k in ipairs(config.Key) do validKeys[k] = true end
+	else
+		validKeys[tostring(config.Key or "")] = true
+	end
+
+	local sg = self.ScreenGui
+	local approved = false
+
+	local Overlay = create("Frame", {
+		Name = "KeySystem",
+		BackgroundColor3 = Color3.fromRGB(0,0,0),
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1,0,1,0),
+		ZIndex = 900,
+		Parent = sg,
+	})
+	quickTween(Overlay, { BackgroundTransparency = 0.45 }, 0.25)
+
+	local Card = create("Frame", {
+		BackgroundColor3 = Theme.Background,
+		AnchorPoint = Vector2.new(0.5,0.5),
+		Position = UDim2.new(0.5,0,0.5,0),
+		Size = UDim2.new(0,320,0,224),
+		ZIndex = 901,
+		Parent = Overlay,
+	}, { corner(14), stroke(Theme.Stroke,1) })
+
+	create("TextLabel", {
+		Text = config.Title or "cuteware — key system",
+		Font = Theme.FontBold, TextSize = 16, TextColor3 = Theme.Text,
+		BackgroundTransparency = 1,
+		Position = UDim2.new(0,20,0,18), Size = UDim2.new(1,-40,0,22),
+		TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 902, Parent = Card,
+	})
+	create("TextLabel", {
+		Text = config.Note or "Enter your key to continue.",
+		Font = Theme.Font, TextSize = 13, TextColor3 = Theme.SubText,
+		BackgroundTransparency = 1, TextWrapped = true,
+		Position = UDim2.new(0,20,0,44), Size = UDim2.new(1,-40,0,40),
+		TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 902, Parent = Card,
+	})
+
+	local InputBox = create("Frame", {
+		BackgroundColor3 = Theme.Tertiary,
+		Position = UDim2.new(0,20,0,92), Size = UDim2.new(1,-40,0,36),
+		ZIndex = 902, Parent = Card,
+	}, { corner(8) })
+	local Input = create("TextBox", {
+		Text = "", PlaceholderText = "Key here...",
+		Font = Theme.Font, TextSize = 14, TextColor3 = Theme.Text,
+		PlaceholderColor3 = Theme.SubText, BackgroundTransparency = 1,
+		Size = UDim2.new(1,-16,1,0), Position = UDim2.new(0,8,0,0),
+		ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 903, Parent = InputBox,
+	})
+
+	local SubmitBtn = create("TextButton", {
+		Text = "Submit", Font = Theme.FontBold, TextSize = 14, TextColor3 = Theme.Text,
+		BackgroundColor3 = Theme.Accent,
+		Position = UDim2.new(0,20,0,140), Size = UDim2.new(1,-40,0,36),
+		ZIndex = 902, Parent = Card,
+	}, { corner(8) })
+	SubmitBtn.MouseEnter:Connect(function() quickTween(SubmitBtn, { BackgroundColor3 = darken(Theme.Accent, 0.85) }, 0.15) end)
+	SubmitBtn.MouseLeave:Connect(function() quickTween(SubmitBtn, { BackgroundColor3 = Theme.Accent }, 0.15) end)
+
+	local StatusLabel = create("TextLabel", {
+		Text = "", Font = Theme.Font, TextSize = 12, TextColor3 = Theme.Error,
+		BackgroundTransparency = 1,
+		Position = UDim2.new(0,20,0,182), Size = UDim2.new(1,-40,0,20),
+		TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 902, Parent = Card,
+	})
+
+	local function shake()
+		local orig = Card.Position
+		for i = 1, 3 do
+			quickTween(Card, { Position = orig + UDim2.new(0,8,0,0) }, 0.05); task.wait(0.05)
+			quickTween(Card, { Position = orig - UDim2.new(0,8,0,0) }, 0.05); task.wait(0.05)
+		end
+		quickTween(Card, { Position = orig }, 0.05)
+	end
+
+	local function tryKey()
+		local text = Input.Text
+		if text ~= "" and validKeys[text] then
+			approved = true
+		else
+			StatusLabel.Text = "Invalid key, try again."
+			shake()
+		end
+	end
+
+	SubmitBtn.MouseButton1Click:Connect(tryKey)
+	Input.FocusLost:Connect(function(enterPressed) if enterPressed then tryKey() end end)
+
+	repeat task.wait() until approved
+
+	quickTween(Overlay, { BackgroundTransparency = 1 }, 0.2)
+	task.wait(0.22)
+	Overlay:Destroy()
+	return true
+end
+
+--------------------------------------------------------------------
+-- CuteWare:Notify(config)
+-- Small toast notification.
+-- config = { Title, Content, Duration (default 4), Position = "TopRight"|"BottomRight" }
 --------------------------------------------------------------------
 function CuteWare:Notify(config)
 	config = config or {}
@@ -196,17 +396,8 @@ end
 
 --------------------------------------------------------------------
 -- CuteWare:NotifyBig(config)
--- Shows a large modal notification INSIDE the cheat window.
--- config = {
---   Title    = string,
---   Content  = string,
---   Duration = number,              -- seconds (default 5)
---   Icon     = number|string|nil,   -- optional image asset id
---   IconSide = 1|2,                 -- 1=left of text, 2=above text (default 1)
---   Buttons  = {                    -- up to 2 buttons (optional)
---     { Text="OK", Callback=function() end },
---   }
--- }
+-- Large modal notification INSIDE the cheat window.
+-- config = { Title, Content, Duration (default 5), Icon, IconSide (1|2), Buttons = { {Text, Callback} } }
 --------------------------------------------------------------------
 function CuteWare:NotifyBig(config)
 	config = config or {}
@@ -217,12 +408,9 @@ function CuteWare:NotifyBig(config)
 	local iconSide = config.IconSide or 1
 	local buttons  = config.Buttons  or {}
 
-	-- NotifyBig attaches to the window's Main frame so it looks "inside" it.
-	-- Falls back to ScreenGui if window not created yet.
 	local parent = self._mainFrame or self.ScreenGui
 	if not parent or not parent.Parent then return end
 
-	-- Dim overlay
 	local Overlay = create("Frame",{
 		Name="BigNotifOverlay",
 		BackgroundColor3=Color3.fromRGB(0,0,0),
@@ -233,7 +421,6 @@ function CuteWare:NotifyBig(config)
 	})
 	quickTween(Overlay,{BackgroundTransparency=0.55},0.2)
 
-	-- Card
 	local Card = create("Frame",{
 		BackgroundColor3=Theme.Secondary,
 		AnchorPoint=Vector2.new(0.5,0.5),
@@ -260,9 +447,10 @@ function CuteWare:NotifyBig(config)
 		HorizontalAlignment=iconSide==2 and Enum.HorizontalAlignment.Center or Enum.HorizontalAlignment.Left,
 	}).Parent=inner
 
-	if icon then
+	local resolvedIcon = resolveImage(icon)
+	if resolvedIcon then
 		create("ImageLabel",{
-			Image=type(icon)=="number" and ("rbxassetid://"..icon) or tostring(icon),
+			Image=resolvedIcon,
 			BackgroundColor3=Theme.Tertiary,
 			BackgroundTransparency=0.3,
 			Size=UDim2.new(0,52,0,52),
@@ -274,7 +462,7 @@ function CuteWare:NotifyBig(config)
 
 	local textBlock = create("Frame",{
 		BackgroundTransparency=1,
-		Size=UDim2.new(icon and (iconSide==1) and 0 or 1, icon and iconSide==1 and 220 or 0, 0,0),
+		Size=UDim2.new(resolvedIcon and (iconSide==1) and 0 or 1, resolvedIcon and iconSide==1 and 220 or 0, 0,0),
 		AutomaticSize=Enum.AutomaticSize.Y,
 		LayoutOrder=2,
 		ZIndex=52,
@@ -322,7 +510,6 @@ function CuteWare:NotifyBig(config)
 		end
 	end
 
-	-- animate in
 	Card.Size=UDim2.new(0,320,0,0)
 	Card.BackgroundTransparency=1
 	quickTween(Card,{BackgroundTransparency=0},0.25)
@@ -337,27 +524,19 @@ end
 --------------------------------------------------------------------
 -- CuteWare:CreateWindow(config)
 -- config = {
---   Name        = string,           -- title text
---   Subtitle    = string|nil,       -- small text under title (optional)
---   Size        = UDim2,            -- default UDim2.new(0,560,0,380)
---   Icon        = number|string|nil, -- image asset id shown left of title
---   BackgroundImage = number|string|nil, -- full-window background image id
---   BackgroundImageTransparency = number, -- 0-1 (default 0.75)
---   --[[ DISABLED: BackgroundDecal = number|string|nil ]]
+--   Name, Subtitle, Size, Icon,
+--   BackgroundImage, BackgroundImageTransparency,  -- asset id OR http(s) url
+--   ToggleKeybind = Enum.KeyCode.RightControl,      -- default menu toggle key
 -- }
--- Returns a Window object.
 --------------------------------------------------------------------
 function CuteWare:CreateWindow(config)
 	config = config or {}
 	local windowName  = config.Name     or "CuteWare"
 	local subtitle    = config.Subtitle
 	local size        = config.Size     or UDim2.new(0,560,0,380)
-	local titleIcon   = config.Icon
-	local bgImage     = config.BackgroundImage
+	local titleIcon   = resolveImage(config.Icon)
+	local bgImage     = resolveImage(config.BackgroundImage)
 	local bgTransp    = config.BackgroundImageTransparency or 0.75
-	--[[ DISABLED – Background Decal (uncomment to enable):
-	local bgDecal     = config.BackgroundDecal  -- asset id
-	--]]
 
 	local TOPBAR_H = 38
 
@@ -375,10 +554,12 @@ function CuteWare:CreateWindow(config)
 	},{ corner(12), stroke(Theme.Stroke,1) })
 	self._mainFrame = Main
 
-	-- Optional background image
+	-- Optional background image (asset id OR http(s) link, see resolveImage)
+	local BackgroundImage
 	if bgImage then
-		create("ImageLabel",{
-			Image=type(bgImage)=="number" and ("rbxassetid://"..bgImage) or tostring(bgImage),
+		BackgroundImage = create("ImageLabel",{
+			Name = "CustomBackground",
+			Image=bgImage,
 			BackgroundTransparency=1,
 			ImageTransparency=bgTransp,
 			ScaleType=Enum.ScaleType.Crop,
@@ -388,17 +569,34 @@ function CuteWare:CreateWindow(config)
 		})
 	end
 
+	function Window:SetBackgroundImage(imageSource, transparency)
+		local resolved = resolveImage(imageSource)
+		if not resolved then return end
+		if not BackgroundImage then
+			BackgroundImage = create("ImageLabel",{
+				Name = "CustomBackground",
+				BackgroundTransparency=1,
+				ScaleType=Enum.ScaleType.Crop,
+				Size=UDim2.new(1,0,1,0),
+				ZIndex=0,
+				Parent=Main,
+			})
+		end
+		BackgroundImage.Image = resolved
+		BackgroundImage.ImageTransparency = transparency or bgTransp
+	end
+
 	-- Spawn animation
 	Main.Size=UDim2.new(0,size.X.Offset*0.9,0,size.Y.Offset*0.9)
 	Main.BackgroundTransparency=1
 	quickTween(Main,{Size=size,BackgroundTransparency=0},0.28)
 
 	--------------------------------------------------------------------
-	-- TOP BAR
+	-- TOP BAR (darker than the tab list / body so the "grab handle" stands out)
 	--------------------------------------------------------------------
 	local TopBar = create("Frame",{
 		Name="TopBar",
-		BackgroundColor3=Theme.Secondary,
+		BackgroundColor3=darken(Theme.Secondary, 0.8),
 		Size=UDim2.new(1,0,0,TOPBAR_H),
 		Parent=Main,
 	})
@@ -407,8 +605,8 @@ function CuteWare:CreateWindow(config)
 	-- Title area (icon + text) ------------------------------------
 	local titleOffset = 16
 	if titleIcon then
-		local iconImg = create("ImageLabel",{
-			Image=type(titleIcon)=="number" and ("rbxassetid://"..titleIcon) or tostring(titleIcon),
+		create("ImageLabel",{
+			Image=titleIcon,
 			BackgroundTransparency=1,
 			Size=UDim2.new(0,22,0,22),
 			Position=UDim2.new(0,12,0.5,-11),
@@ -473,20 +671,17 @@ function CuteWare:CreateWindow(config)
 		return b
 	end
 
-	-- ✕ close icon matching Rayfield / Orion style
 	local MinBtn   = makeCtrlBtn("—",  darken(Theme.Tertiary,0.9), Theme.Accent, 1)
 	local MaxBtn   = makeCtrlBtn("▢",  darken(Theme.Tertiary,0.9), Theme.Accent, 2)
 	local CloseBtn = makeCtrlBtn("╳",  darken(Theme.Error,0.5),    Theme.Text,   3)
 
 	--------------------------------------------------------------------
 	-- MINIMIZE / MAXIMIZE STATE
-	-- We track restored size/pos in variables instead of reading
-	-- Main.Size at click-time so mid-tween clicks can't corrupt them.
 	--------------------------------------------------------------------
 	local minimized, maximized = false, false
 	local windowSize = size
 	local windowPos  = Main.Position
-	local TabListShell, ContentArea  -- assigned below, used in minimize
+	local TabListShell, ContentArea
 
 	local function hideCtrlBtns()
 		MaxBtn.Visible   = false
@@ -497,14 +692,17 @@ function CuteWare:CreateWindow(config)
 		CloseBtn.Visible = true
 	end
 
+	-- NOTE: the "restore" icon shown once minimized now matches Maximize's
+	-- own restore icon ("❐") instead of an up-arrow, so both controls use
+	-- the same visual language for "back to normal size".
 	local function setMinVisual(isMin)
 		topBarMasks.MaskBL.Visible = not isMin
 		topBarMasks.MaskBR.Visible = not isMin
-		MinBtn.Text = isMin and "▲" or "—"
+		MinBtn.Text = isMin and "❐" or "—"
 		if isMin then hideCtrlBtns() else showCtrlBtns() end
 	end
 
-	local clearDrag  -- assigned in drag block below
+	local clearDrag
 
 	local function doRestore()
 		maximized = false
@@ -551,9 +749,21 @@ function CuteWare:CreateWindow(config)
 	end)
 
 	--------------------------------------------------------------------
+	-- MENU TOGGLE KEYBIND
+	-- Default RCtrl. Change at runtime via Section:CreateMenuKeybindDropdown()
+	-- or up front via config.ToggleKeybind.
+	--------------------------------------------------------------------
+	local toggleKey = config.ToggleKeybind or Enum.KeyCode.RightControl
+
+	UserInputService.InputBegan:Connect(function(input, processed)
+		if processed then return end
+		if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == toggleKey then
+			Main.Visible = not Main.Visible
+		end
+	end)
+
+	--------------------------------------------------------------------
 	-- SMOOTH DRAGGING
-	-- When coming out of maximized via topbar drag, the window snaps so
-	-- its center-X aligns under the cursor (like Windows/macOS behaviour).
 	--------------------------------------------------------------------
 	do
 		local dragging = false
@@ -573,10 +783,8 @@ function CuteWare:CreateWindow(config)
 			if overControls(input.Position) then return end
 
 			if maximized then
-				-- restore and re-anchor window center under cursor
 				local mx = input.Position.X
 				local halfW = windowSize.X.Offset / 2
-				local halfH = windowSize.Y.Offset / 2
 				local newX  = mx - halfW
 				local newY  = input.Position.Y - TOPBAR_H/2
 
@@ -586,7 +794,6 @@ function CuteWare:CreateWindow(config)
 				Main.Position = UDim2.new(0,newX,0,newY)
 				windowPos     = Main.Position
 
-				-- now start dragging immediately from this new anchor
 				dragging  = true
 				dragStart = input.Position
 				startPos  = Main.Position
@@ -658,11 +865,6 @@ function CuteWare:CreateWindow(config)
 
 	--------------------------------------------------------------------
 	-- Window:AddTabButton(config)
-	-- Adds a custom button at the bottom of the tab list.
-	-- config = {
-	--   Name     = string,
-	--   Callback = function()
-	-- }
 	--------------------------------------------------------------------
 	function Window:AddTabButton(btnConfig)
 		btnConfig = btnConfig or {}
@@ -687,8 +889,6 @@ function CuteWare:CreateWindow(config)
 
 	--------------------------------------------------------------------
 	-- Window:CreateTab(config)
-	-- config = { Name = string }
-	-- Returns a Tab object with CreateSection() method.
 	--------------------------------------------------------------------
 	function Window:CreateTab(tabConfig)
 		tabConfig = tabConfig or {}
@@ -698,6 +898,7 @@ function CuteWare:CreateWindow(config)
 			Text=tabName,Font=Theme.Font,TextSize=14,
 			TextColor3=Theme.SubText,
 			BackgroundColor3=Theme.Tertiary,BackgroundTransparency=1,
+			ClipsDescendants=true,
 			Size=UDim2.new(1,0,0,34),
 			Parent=TabList,
 		},{ corner(8) })
@@ -726,21 +927,38 @@ function CuteWare:CreateWindow(config)
 
 		local function selectTab()
 			for _,t in pairs(Window.Tabs) do
-				t.Active=false; t.Page.Visible=false
-				quickTween(t.Button,{BackgroundTransparency=1,TextColor3=Theme.SubText},0.15)
+				if t ~= Tab then
+					t.Active=false; t.Page.Visible=false
+					quickTween(t.Button,{BackgroundTransparency=1,TextColor3=Theme.SubText},0.15)
+				end
 			end
 			Tab.Active=true; Page.Visible=true
-			quickTween(TabBtn,{BackgroundTransparency=0,TextColor3=Theme.Text},0.15)
+			quickTween(TabBtn,{BackgroundTransparency=0,BackgroundColor3=Theme.Tertiary,TextColor3=Theme.Text},0.15)
 		end
 
-		TabBtn.MouseButton1Click:Connect(selectTab)
+		-- Click = ripple wipe (grows from the click point, same color the
+		-- tab settles into) instead of an instant/flat color swap.
+		TabBtn.MouseButton1Click:Connect(function()
+			local mouse = UserInputService:GetMouseLocation()
+			local relX = mouse.X - TabBtn.AbsolutePosition.X
+			local relY = mouse.Y - TabBtn.AbsolutePosition.Y
+			spawnRipple(TabBtn, relX, relY, Theme.Tertiary, 0.35)
+			selectTab()
+		end)
+
+		-- Hover: inactive tabs get a solid (non-transparent) background
+		-- instead of just a text-color change.
 		TabBtn.MouseEnter:Connect(function()
-			if not Tab.Active then quickTween(TabBtn,{TextColor3=Theme.Text},0.12) end
-			quickTween(TabScale,{Scale=1.035},0.15)
+			if not Tab.Active then
+				quickTween(TabBtn, { BackgroundTransparency = 0, BackgroundColor3 = Theme.Tertiary, TextColor3 = Theme.Text }, 0.15)
+			end
+			quickTween(TabScale, { Scale = 1.035 }, 0.15)
 		end)
 		TabBtn.MouseLeave:Connect(function()
-			if not Tab.Active then quickTween(TabBtn,{TextColor3=Theme.SubText},0.12) end
-			quickTween(TabScale,{Scale=1},0.15)
+			if not Tab.Active then
+				quickTween(TabBtn, { BackgroundTransparency = 1, TextColor3 = Theme.SubText }, 0.15)
+			end
+			quickTween(TabScale, { Scale = 1 }, 0.15)
 		end)
 
 		table.insert(Window.Tabs,Tab)
@@ -748,7 +966,6 @@ function CuteWare:CreateWindow(config)
 
 		------------------------------------------------------------------
 		-- Tab:CreateSection(name)
-		-- Returns a Section object containing all element creators.
 		------------------------------------------------------------------
 		function Tab:CreateSection(name)
 			local SH = create("Frame",{
@@ -771,12 +988,6 @@ function CuteWare:CreateWindow(config)
 			local Section = { Holder=SH }
 
 			------------------------------------------------------------
-			-- Section:CreateButton(config)
-			-- config = {
-			--   Name     = string,
-			--   Callback = function()
-			-- }
-			------------------------------------------------------------
 			function Section:CreateButton(c)
 				c = c or {}
 				local Btn = create("TextButton",{
@@ -792,15 +1003,6 @@ function CuteWare:CreateWindow(config)
 				return Btn
 			end
 
-			------------------------------------------------------------
-			-- Section:CreateToggle(config)
-			-- config = {
-			--   Name         = string,
-			--   Flag         = string,        -- key in CuteWare.Flags
-			--   CurrentValue = bool,          -- initial state (default false)
-			--   Callback     = function(bool)
-			-- }
-			-- Returns { Set = function(bool) }
 			------------------------------------------------------------
 			function Section:CreateToggle(c)
 				c = c or {}
@@ -840,16 +1042,6 @@ function CuteWare:CreateWindow(config)
 			end
 
 			------------------------------------------------------------
-			-- Section:CreateSlider(config)
-			-- config = {
-			--   Name         = string,
-			--   Range        = {min, max},    -- default {0,100}
-			--   Increment    = number,        -- step size (default 1)
-			--   CurrentValue = number,        -- initial value
-			--   Flag         = string,
-			--   Callback     = function(number)
-			-- }
-			------------------------------------------------------------
 			function Section:CreateSlider(c)
 				c = c or {}
 				local mn  = c.Range and c.Range[1] or 0
@@ -878,7 +1070,6 @@ function CuteWare:CreateWindow(config)
 					BackgroundColor3=Theme.Accent,
 					Size=UDim2.new((val-mn)/(mx-mn),0,1,0),Parent=Bar,
 				},{ corner(4) })
-				-- Knob is a sibling of Fill inside Bar so it doesn't inherit Fill's scale
 				local Knob = create("Frame",{
 					BackgroundColor3=Color3.fromRGB(255,255,255),
 					AnchorPoint=Vector2.new(0.5,0.5),
@@ -915,19 +1106,6 @@ function CuteWare:CreateWindow(config)
 			end
 
 			------------------------------------------------------------
-			-- Section:CreateDropdown(config)
-			-- config = {
-			--   Name          = string,
-			--   Mode          = "single"|"multi",  -- default "single"
-			--   Options       = { string, ... },
-			--   CurrentOption = string (single) | {string,...} (multi),
-			--   Flag          = string,
-			--   Callback      = function(value)  -- string or table
-			-- }
-			-- FIX: OptionList height is 0 by default and only expands on
-			-- click.  AutomaticSize is NOT used on OptionList (it was the
-			-- source of the "empty space" bug).
-			------------------------------------------------------------
 			function Section:CreateDropdown(c)
 				c = c or {}
 				local opts  = c.Options or {}
@@ -935,14 +1113,11 @@ function CuteWare:CreateWindow(config)
 				local cur   = c.CurrentOption or opts[1]
 				local open  = false
 
-				-- Outer holder uses AutomaticSize=Y so section resizes
-				-- when the list expands, but it MUST ClipsDescendants so
-				-- the list doesn't leak outside during the tween.
 				local H = create("Frame",{
 					BackgroundTransparency=1,
-					Size=UDim2.new(1,0,0,56),   -- fixed: label 18 + gap 4 + box 34 = 56
+					Size=UDim2.new(1,0,0,56),
 					Parent=SH,
-					ClipsDescendants=false,      -- let list overflow visually (Z stacking)
+					ClipsDescendants=false,
 				})
 
 				create("TextLabel",{
@@ -973,14 +1148,11 @@ function CuteWare:CreateWindow(config)
 					Size=UDim2.new(0,24,1,0),Position=UDim2.new(1,-28,0,0),Parent=Box,
 				})
 
-				-- OptionList is a sibling of H, parented to SH so it
-				-- sits on top of elements below H instead of pushing them.
-				-- We reposition it below H dynamically.
 				local optH = #opts * 30
 				local OptionList = create("Frame",{
 					BackgroundColor3=Theme.Tertiary,
 					Size=UDim2.new(1,-24,0,0),
-					Position=UDim2.new(0,0,0,0),  -- set after render
+					Position=UDim2.new(0,0,0,0),
 					ZIndex=20,
 					ClipsDescendants=true,
 					Visible=false,
@@ -990,7 +1162,6 @@ function CuteWare:CreateWindow(config)
 					create("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder}),
 				})
 
-				-- Update OptionList position to sit just below Box
 				local function reposOptionList()
 					OptionList.Position = UDim2.new(0,0,0, H.Position.Y.Offset+56)
 				end
@@ -1038,7 +1209,6 @@ function CuteWare:CreateWindow(config)
 							OB.TextColor3=Theme.Accent
 							if c.Flag then CuteWare.Flags[c.Flag]=cur end
 							if c.Callback then c.Callback(cur) end
-							-- close after selection in single mode
 							open=false
 							quickTween(Arrow,{Rotation=0},0.18)
 							quickTween(OptionList,{Size=UDim2.new(1,-24,0,0)},0.18)
@@ -1070,142 +1240,31 @@ function CuteWare:CreateWindow(config)
 			end
 
 			------------------------------------------------------------
-			-- Section:CreateColorPicker(config)   [Picker 1 – thin]
-			-- Left side: narrow vertical hue strip.
-			-- Right side: large SV box.
-			-- Opens/closes by clicking the preview swatch.
-			-- config = {
-			--   Name         = string,
-			--   CurrentColor = Color3,
-			--   Flag         = string,
-			--   Callback     = function(Color3)
-			-- }
+			-- Section:CreateMenuKeybindDropdown(config)
+			-- A ready-made dropdown for picking which key toggles the
+			-- whole menu open/closed. Options: RCtrl (default), F, RShift,
+			-- RAlt, LAlt, K, M.
 			------------------------------------------------------------
-			function Section:CreateColorPicker(c)
+			function Section:CreateMenuKeybindDropdown(c)
 				c = c or {}
-				local col  = c.CurrentColor or Color3.fromRGB(255,255,255)
-				local flag = c.Flag
-				local open = false
-				local h,s,v = col:ToHSV()
-
-				local H = create("Frame",{
-					BackgroundTransparency=1,
-					Size=UDim2.new(1,0,0,30),   -- collapsed height = header only
-					Parent=SH,
-					ClipsDescendants=true,
+				return Section:CreateDropdown({
+					Name = c.Name or "Menu Keybind",
+					Options = KeybindOptions,
+					CurrentOption = c.CurrentOption or "RCtrl",
+					Callback = function(selected)
+						toggleKey = KeybindMap[selected]
+						if c.Callback then c.Callback(selected, toggleKey) end
+					end,
 				})
-
-				-- header row
-				local Header = create("Frame",{BackgroundTransparency=1,Size=UDim2.new(1,0,0,30),Parent=H})
-				create("TextLabel",{
-					Text=c.Name or "Color",Font=Theme.Font,TextSize=13,
-					TextColor3=Theme.Text,BackgroundTransparency=1,
-					Size=UDim2.new(1,-40,1,0),
-					TextXAlignment=Enum.TextXAlignment.Left,Parent=Header,
-				})
-				local Preview = create("TextButton",{
-					Text="",BackgroundColor3=col,
-					Size=UDim2.new(0,28,0,20),Position=UDim2.new(1,-28,0.5,-10),
-					Parent=Header,
-				},{ corner(6), stroke(Theme.Stroke,1) })
-
-				-- picker body (initially off-screen via Size height=0 + ClipsDescendants)
-				local Body = create("Frame",{
-					BackgroundTransparency=1,
-					Position=UDim2.new(0,0,0,34),
-					Size=UDim2.new(1,0,0,130),
-					Parent=H,
-				})
-
-				-- hue strip (thin, left)
-				local HueBar = create("Frame",{
-					Position=UDim2.new(0,0,0,0),Size=UDim2.new(0,16,0,130),
-					Parent=Body,
-				},{ corner(4) })
-				create("UIGradient",{
-					Color=ColorSequence.new({
-						ColorSequenceKeypoint.new(0,    Color3.fromRGB(255,0,0)),
-						ColorSequenceKeypoint.new(0.17, Color3.fromRGB(255,255,0)),
-						ColorSequenceKeypoint.new(0.33, Color3.fromRGB(0,255,0)),
-						ColorSequenceKeypoint.new(0.50, Color3.fromRGB(0,255,255)),
-						ColorSequenceKeypoint.new(0.67, Color3.fromRGB(0,0,255)),
-						ColorSequenceKeypoint.new(0.83, Color3.fromRGB(255,0,255)),
-						ColorSequenceKeypoint.new(1,    Color3.fromRGB(255,0,0)),
-					}),
-					Rotation=0,
-				}).Parent=HueBar
-				local HueCur = create("Frame",{
-					AnchorPoint=Vector2.new(0.5,0.5),
-					Size=UDim2.new(1,4,0,4),
-					BackgroundColor3=Color3.fromRGB(255,255,255),
-					Position=UDim2.new(0.5,0,h,0),Parent=HueBar,
-				},{ corner(2), stroke(Color3.fromRGB(0,0,0),1) })
-
-				-- SV box (wide, right)
-				local SVBox = create("ImageLabel",{
-					Image="rbxassetid://4155801252",
-					BackgroundColor3=Color3.fromHSV(h,1,1),
-					Size=UDim2.new(1,-20,0,130),
-					Position=UDim2.new(0,20,0,0),
-					Parent=Body,
-				},{ corner(6) })
-				local SVCur = create("Frame",{
-					AnchorPoint=Vector2.new(0.5,0.5),
-					Size=UDim2.new(0,10,0,10),
-					BackgroundColor3=Color3.fromRGB(255,255,255),
-					Position=UDim2.new(s,0,1-v,0),Parent=SVBox,
-				},{ corner(5), stroke(Color3.fromRGB(0,0,0),1) })
-
-				local function updCol()
-					col=Color3.fromHSV(h,s,v)
-					Preview.BackgroundColor3=col
-					SVBox.BackgroundColor3=Color3.fromHSV(h,1,1)
-					if flag then CuteWare.Flags[flag]=col end
-					if c.Callback then c.Callback(col) end
-				end
-
-				local dragSV,dragHue=false,false
-				SVBox.InputBegan:Connect(function(i)  if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragSV=true end end)
-				HueBar.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragHue=true end end)
-				UserInputService.InputEnded:Connect(function(i)
-					if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragSV=false; dragHue=false end
-				end)
-				UserInputService.InputChanged:Connect(function(i)
-					if i.UserInputType~=Enum.UserInputType.MouseMovement and i.UserInputType~=Enum.UserInputType.Touch then return end
-					if dragSV then
-						s=math.clamp((i.Position.X-SVBox.AbsolutePosition.X)/SVBox.AbsoluteSize.X,0,1)
-						v=1-math.clamp((i.Position.Y-SVBox.AbsolutePosition.Y)/SVBox.AbsoluteSize.Y,0,1)
-						SVCur.Position=UDim2.new(s,0,1-v,0); updCol()
-					elseif dragHue then
-						h=math.clamp((i.Position.Y-HueBar.AbsolutePosition.Y)/HueBar.AbsoluteSize.Y,0,1)
-						HueCur.Position=UDim2.new(0.5,0,h,0); updCol()
-					end
-				end)
-
-				Preview.MouseButton1Click:Connect(function()
-					open=not open
-					quickTween(H,{Size=UDim2.new(1,0,0,open and 168 or 30)},0.2)
-				end)
-
-				if flag then CuteWare.Flags[flag]=col end
-				return H
 			end
 
 			------------------------------------------------------------
-			-- Section:CreateColorPicker2(config)  [Picker 2 – wide]
-			-- Left side: SV box (large).
-			-- Right side: vertical hue strip (narrower than picker 1,
-			--             but taller and more visible).
-			-- The hue is selected by dragging up/down the strip,
-			-- NOT by spinning a wheel (which caused the circular bug).
-			-- config = {
-			--   Name         = string,
-			--   CurrentColor = Color3,
-			--   Flag         = string,
-			--   Callback     = function(Color3)
-			-- }
+			-- Section:CreateColorPicker(config)
+			-- Single picker style: SV box on the left, a vertical hue
+			-- strip on the right. Moving UP the strip increases the hue
+			-- (bottom = low, top = high), per request.
 			------------------------------------------------------------
-			function Section:CreateColorPicker2(c)
+			function Section:CreateColorPicker(c)
 				c = c or {}
 				local col  = c.CurrentColor or Color3.fromRGB(255,255,255)
 				local flag = c.Flag
@@ -1226,11 +1285,22 @@ function CuteWare:CreateWindow(config)
 					Size=UDim2.new(1,-40,1,0),
 					TextXAlignment=Enum.TextXAlignment.Left,Parent=Header,
 				})
+				-- Preview swatch: shows the picked color as its background, with
+				-- a small "❐"-style icon overlay (same glyph the minimize button
+				-- uses once restored) instead of a plain dead square.
 				local Preview = create("TextButton",{
 					Text="",BackgroundColor3=col,
 					Size=UDim2.new(0,28,0,20),Position=UDim2.new(1,-28,0.5,-10),
 					Parent=Header,
 				},{ corner(6), stroke(Theme.Stroke,1) })
+				local PreviewIcon = create("TextLabel",{
+					Text="❐",
+					Font=Theme.FontBold,TextSize=10,
+					TextColor3=getContrastText(col),
+					BackgroundTransparency=1,
+					Size=UDim2.new(1,0,1,0),
+					Parent=Preview,
+				})
 
 				local Body = create("Frame",{
 					BackgroundTransparency=1,
@@ -1239,7 +1309,7 @@ function CuteWare:CreateWindow(config)
 					Parent=H,
 				})
 
-				-- SV box LEFT (large, takes most of the width)
+				-- SV box (left, large)
 				local SVBox = create("ImageLabel",{
 					Image="rbxassetid://4155801252",
 					BackgroundColor3=Color3.fromHSV(h,1,1),
@@ -1254,7 +1324,7 @@ function CuteWare:CreateWindow(config)
 					Position=UDim2.new(s,0,1-v,0),Parent=SVBox,
 				},{ corner(5), stroke(Color3.fromRGB(0,0,0),1) })
 
-				-- hue strip RIGHT (narrower but full height)
+				-- Hue strip (right, vertical, bottom-to-top)
 				local HueBar = create("Frame",{
 					Position=UDim2.new(1,-28,0,0),
 					Size=UDim2.new(0,28,0,160),
@@ -1272,16 +1342,18 @@ function CuteWare:CreateWindow(config)
 					}),
 					Rotation=0,
 				}).Parent=HueBar
+				-- cursor Y = 1-h: h=1 (max) sits at the top, h=0 at the bottom
 				local HueCur = create("Frame",{
 					AnchorPoint=Vector2.new(0.5,0.5),
 					Size=UDim2.new(1,4,0,6),
 					BackgroundColor3=Color3.fromRGB(255,255,255),
-					Position=UDim2.new(0.5,0,h,0),Parent=HueBar,
+					Position=UDim2.new(0.5,0,1-h,0),Parent=HueBar,
 				},{ corner(3), stroke(Color3.fromRGB(0,0,0),1) })
 
 				local function updCol()
 					col=Color3.fromHSV(h,s,v)
 					Preview.BackgroundColor3=col
+					PreviewIcon.TextColor3=getContrastText(col)
 					SVBox.BackgroundColor3=Color3.fromHSV(h,1,1)
 					if flag then CuteWare.Flags[flag]=col end
 					if c.Callback then c.Callback(col) end
@@ -1300,8 +1372,9 @@ function CuteWare:CreateWindow(config)
 						v=1-math.clamp((i.Position.Y-SVBox.AbsolutePosition.Y)/SVBox.AbsoluteSize.Y,0,1)
 						SVCur.Position=UDim2.new(s,0,1-v,0); updCol()
 					elseif dragHue then
-						h=math.clamp((i.Position.Y-HueBar.AbsolutePosition.Y)/HueBar.AbsoluteSize.Y,0,1)
-						HueCur.Position=UDim2.new(0.5,0,h,0); updCol()
+						local relY = math.clamp((i.Position.Y-HueBar.AbsolutePosition.Y)/HueBar.AbsoluteSize.Y,0,1)
+						h = 1 - relY -- moving UP the strip increases hue
+						HueCur.Position=UDim2.new(0.5,0,1-h,0); updCol()
 					end
 				end)
 
@@ -1314,15 +1387,6 @@ function CuteWare:CreateWindow(config)
 				return H
 			end
 
-			------------------------------------------------------------
-			-- Section:CreateTextbox(config)
-			-- config = {
-			--   Name            = string,
-			--   PlaceholderText = string,
-			--   CurrentValue    = string,
-			--   Flag            = string,
-			--   Callback        = function(text, enterPressed)
-			-- }
 			------------------------------------------------------------
 			function Section:CreateTextbox(c)
 				c = c or {}
@@ -1354,15 +1418,6 @@ function CuteWare:CreateWindow(config)
 				return H
 			end
 
-			------------------------------------------------------------
-			-- Section:CreateKeybind(config)
-			-- config = {
-			--   Name            = string,
-			--   CurrentKeybind  = Enum.KeyCode,  -- default KeyCode.F
-			--   Flag            = string,
-			--   Callback        = function(KeyCode)  -- fires on rebind
-			--   Pressed         = function()          -- fires on keypress
-			-- }
 			------------------------------------------------------------
 			function Section:CreateKeybind(c)
 				c = c or {}
@@ -1399,10 +1454,6 @@ function CuteWare:CreateWindow(config)
 				return H
 			end
 
-			------------------------------------------------------------
-			-- Section:CreateLabel(text)
-			-- Renders a plain wrapped text label inside the section.
-			-- text = string
 			------------------------------------------------------------
 			function Section:CreateLabel(text)
 				return create("TextLabel",{

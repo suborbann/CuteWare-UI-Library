@@ -1,187 +1,408 @@
 local CuteWare = loadstring(game:HttpGet("https://raw.githubusercontent.com/suborbann/CuteWare-UI-Library/refs/heads/main/source"))()
 CuteWare:Init()
 
--- ============================================
--- (OPTIONAL) KEY SYSTEM
--- Enabled=false -> skipped instantly. Flip to true and set Key to require one.
--- ============================================
+-- Key System (optional, set Enabled = false to skip)
 CuteWare:CreateKeySystem({
-	Enabled = false,
-	Key = "cutekey123", -- or {"key1","key2"}
-	Title = "cuteware — key system",
-	Note = "Join our Discord to get a key: dsc.gg/cuteware",
+    Enabled = true,  -- Set to true and add your key to enable
+    Key     = "cutekey123",
+    Title   = "CuteWare Access",
+    Note    = "Enter your key to continue (cutekey123).",
+    OnClose = function()
+        CuteWare:Notify({
+            Title   = "Denied",
+            Content = "Invalid key or cancelled.",
+            Duration = 3,
+            Position = "TopRight"
+        })
+    end,
 })
 
--- ============================================
--- MAIN WINDOW
--- ============================================
+-- Create Main Window
 local Window = CuteWare:CreateWindow({
-	Name = "cuteware",
-	Subtitle = "uwu executor menu",
-	Size = UDim2.new(0, 560, 0, 380),
-	ToggleKeybind = Enum.KeyCode.RightControl, -- default menu toggle key
-
-	-- Background image: asset id, "rbxassetid://...", OR a raw http(s) link
-	-- (link support depends on your executor exposing writefile+getcustomasset)
-	-- BackgroundImage = 123456789,
-	-- BackgroundImage = "https://example.com/mybg.png",
-	-- BackgroundImageTransparency = 0.8,
+    Name                        = "CuteWare Demo",
+    Subtitle                    = "Full Feature Showcase",
+    Size                        = UDim2.new(0, 600, 0, 450),
+    Icon                        = 125089054351368,
+    BackgroundImage             = "rbxassetid://128555281091950",
+    BackgroundImageTransparency = 0.75,
+    ToggleKeybind               = Enum.KeyCode.RightControl,
 })
 
 -- ============================================
--- TAB 1: COMBAT
+-- TAB 1: BASIC ELEMENTS
 -- ============================================
-local CombatTab = Window:CreateTab({ Name = "Combat" })
-local AimSection = CombatTab:CreateSection("Aimbot")
-
-AimSection:CreateToggle({
-	Name = "Aimbot Enabled",
-	Flag = "AimbotEnabled",
-	CurrentValue = false,
-	Callback = function(state) print("Aimbot:", state) end,
+local Tab1 = Window:CreateTab({
+    Name = "Basics",
+    Icon = 128457643781626,
 })
 
-AimSection:CreateSlider({
-	Name = "Aimbot FOV",
-	Range = {10, 500},
-	Increment = 5,
-	CurrentValue = 90,
-	Flag = "AimbotFOV",
-	Callback = function(value) print("FOV:", value) end,
+local Section1 = Tab1:CreateSection("Basic Controls")
+
+Section1:CreateLabel("Welcome to CuteWare! Try all the controls below.")
+
+Section1:CreateToggle({
+    Name         = "Enable Feature",
+    Flag         = "BasicToggle",
+    CurrentValue = false,
+    Callback     = function(state)
+        print("Toggle state:", state)
+    end,
 })
 
-AimSection:CreateDropdown({
-	Name = "Target Priority",
-	Mode = "single",
-	Options = {"Closest", "Lowest Health", "Random", "Top Scorer"},
-	CurrentOption = "Closest",
-	Flag = "TargetPriority",
-	Callback = function(selected) print("Priority:", selected) end,
+Section1:CreateButton({
+    Name     = "Click Me!",
+    Callback = function()
+        CuteWare:Notify({
+            Title    = "Button Pressed",
+            Content  = "You clicked the button!",
+            Duration = 3,
+            Position = "TopRight"
+        })
+    end,
 })
 
-AimSection:CreateKeybind({
-	Name = "Aim Keybind",
-	CurrentKeybind = Enum.KeyCode.Q,
-	Flag = "AimKeybind",
-	Callback = function(key) print("Aim key changed:", key.Name) end,
-	Pressed = function() print("Aim key pressed!") end,
-})
-
-local VisualsSection = CombatTab:CreateSection("Wallhack & ESP")
-
-VisualsSection:CreateToggle({
-	Name = "Wallhack",
-	Flag = "WallhackEnabled",
-	CurrentValue = false,
-	Callback = function(state) print("Wallhack:", state) end,
-})
-
-VisualsSection:CreateColorPicker({
-	Name = "Wallhack Color",
-	CurrentColor = Color3.fromRGB(255, 0, 0),
-	Flag = "WallhackColor",
-	Callback = function(color) print("Wallhack color:", color) end,
-})
-
-VisualsSection:CreateToggle({
-	Name = "ESP",
-	Flag = "ESPEnabled",
-	CurrentValue = false,
-	Callback = function(state) print("ESP:", state) end,
-})
-
-VisualsSection:CreateColorPicker({
-	Name = "ESP Color",
-	CurrentColor = Color3.fromRGB(0, 255, 100),
-	Flag = "ESPColor",
-	Callback = function(color) print("ESP color:", color) end,
-})
-
-VisualsSection:CreateButton({
-	Name = "Print Current Flags",
-	Callback = function()
-		print("=== CURRENT FLAGS ===")
-		for k, v in pairs(CuteWare.Flags) do print(k, ":", v) end
-	end,
+Section1:CreateCloseButton({
+    Name     = "Close Window",
+    Callback = function()
+        print("Window closing...")
+    end,
 })
 
 -- ============================================
--- TAB 2: MISC / SETTINGS
+-- TAB 2: SLIDERS & INPUT
 -- ============================================
-local MiscTab = Window:CreateTab({ Name = "Misc" })
-local GeneralSection = MiscTab:CreateSection("General")
-
-GeneralSection:CreateTextbox({
-	Name = "Player Name Filter",
-	PlaceholderText = "Enter player name...",
-	CurrentValue = "",
-	Flag = "PlayerNameFilter",
-	Callback = function(text, enterPressed) print("Filter:", text, enterPressed) end,
+local Tab2 = Window:CreateTab({
+    Name = "Input",
+    Icon = 128457643781626,
 })
 
-GeneralSection:CreateKeybind({
-	Name = "Menu Toggle (legacy)",
-	CurrentKeybind = Enum.KeyCode.F,
-	Flag = "MenuKeybindLegacy",
-	Callback = function(key) print("Legacy keybind:", key.Name) end,
-	Pressed = function() print("Legacy keybind pressed!") end,
+local Section2 = Tab2:CreateSection("Sliders & Text")
+
+Section2:CreateSlider({
+    Name         = "Speed Multiplier",
+    Range        = {0, 100},
+    Increment    = 5,
+    CurrentValue = 50,
+    Flag         = "SpeedMultiplier",
+    Callback     = function(value)
+        print("Speed set to:", value)
+    end,
 })
 
-GeneralSection:CreateDropdown({
-	Name = "Game Mode (Multi-Select)",
-	Mode = "multi",
-	Options = {"Deathmatch", "Team Deathmatch", "Capture The Flag", "King of the Hill", "Survival"},
-	CurrentOption = {"Deathmatch"},
-	Flag = "GameModes",
-	Callback = function(selected)
-		print("Modes:", table.concat(selected, ", "))
-	end,
+Section2:CreateSlider({
+    Name         = "Volume Level",
+    Range        = {0, 1},
+    Increment    = 0.1,
+    CurrentValue = 0.5,
+    Flag         = "VolumeLevel",
+    Callback     = function(value)
+        print("Volume:", value)
+    end,
 })
 
-GeneralSection:CreateSlider({
-	Name = "Speed Multiplier",
-	Range = {1, 10},
-	Increment = 0.5,
-	CurrentValue = 1,
-	Flag = "SpeedMultiplier",
-	Callback = function(value) print("Speed:", value) end,
+Section2:CreateTextbox({
+    Name            = "Player Name",
+    PlaceholderText = "Enter a name...",
+    CurrentValue    = "",
+    Flag            = "PlayerName",
+    Callback        = function(text, enterPressed)
+        if enterPressed then
+            CuteWare:Notify({
+                Title    = "Name Set",
+                Content  = "Player name: " .. text,
+                Duration = 2,
+                Position = "BottomRight"
+            })
+        end
+    end,
 })
 
-local SettingsSection = MiscTab:CreateSection("Settings")
-
--- Ready-made dropdown for changing which key opens/closes the whole menu.
--- Options: RCtrl (default), F, RShift, RAlt, LAlt, K, M
-SettingsSection:CreateMenuKeybindDropdown({
-	Name = "Menu Keybind",
-	CurrentOption = "RCtrl",
-	Callback = function(name, keyCode) print("Menu now toggles with:", name) end,
-})
-
-SettingsSection:CreateToggle({
-	Name = "Custom Settings",
-	Flag = "CustomSettingsEnabled",
-	CurrentValue = false,
-	Callback = function(state) print("Custom settings:", state) end,
-})
-
-SettingsSection:CreateLabel("💡 Tip: press your menu keybind anytime to show/hide this window.")
+Section2:CreateLabel("Enter your player name above and press Enter.")
 
 -- ============================================
--- NOTIFICATIONS
+-- TAB 3: DROPDOWNS
+-- ============================================
+local Tab3 = Window:CreateTab({
+    Name = "Dropdowns",
+    Icon = 128457643781626,
+})
+
+local Section3 = Tab3:CreateSection("Single & Multi Select")
+
+Section3:CreateDropdown({
+    Name          = "Game Mode",
+    Mode          = "single",
+    Options       = {"Survival", "Creative", "Adventure", "Hardcore"},
+    CurrentOption = "Survival",
+    Flag          = "GameMode",
+    Callback      = function(selected)
+        print("Mode selected:", selected)
+    end,
+})
+
+Section3:CreateDropdown({
+    Name          = "Preferred Colors",
+    Mode          = "multi",
+    Options       = {"Red", "Blue", "Green", "Yellow", "Purple", "Orange"},
+    CurrentOption = {"Red", "Blue"},
+    Flag          = "PreferredColors",
+    Callback      = function(selected)
+        print("Colors selected:", table.concat(selected, ", "))
+    end,
+})
+
+Section3:CreateMenuKeybindDropdown({
+    Name          = "Menu Keybind",
+    CurrentOption = "RCtrl",
+    Callback      = function(name, keyCode)
+        print("Menu keybind changed to:", name)
+    end,
+})
+
+-- ============================================
+-- TAB 4: COLORS & KEYBINDS
+-- ============================================
+local Tab4 = Window:CreateTab({
+    Name = "Advanced",
+    Icon = 128457643781626,
+})
+
+local Section4 = Tab4:CreateSection("Color & Keybind")
+
+Section4:CreateColorPicker({
+    Name         = "Accent Color",
+    CurrentColor = Color3.fromRGB(255, 130, 180),
+    Flag         = "AccentColor",
+    Callback     = function(color)
+        print("Color selected:", color)
+    end,
+})
+
+Section4:CreateColorPicker({
+    Name         = "Theme Color",
+    CurrentColor = Color3.fromRGB(100, 150, 255),
+    Flag         = "ThemeColor",
+    Callback     = function(color)
+        print("Theme color:", color)
+    end,
+})
+
+Section4:CreateKeybind({
+    Name           = "Activate Feature",
+    CurrentKeybind = Enum.KeyCode.F,
+    Flag           = "ActivateKeybind",
+    Callback       = function(key)
+        print("Keybind changed to:", key.Name)
+    end,
+    Pressed        = function()
+        print("Keybind activated!")
+        CuteWare:Notify({
+            Title    = "Activated",
+            Content  = "Feature is now active!",
+            Duration = 2,
+        })
+    end,
+})
+
+local Section4B = Tab4:CreateSection("More Options")
+
+Section4B:CreateKeybind({
+    Name           = "Quick Action",
+    CurrentKeybind = Enum.KeyCode.E,
+    Flag           = "QuickActionKeybind",
+    Callback       = function(key)
+        print("Quick action bound to:", key.Name)
+    end,
+    Pressed        = function()
+        print("Quick action pressed!")
+    end,
+})
+
+-- ============================================
+-- TAB 5: NOTIFICATIONS
+-- ============================================
+local Tab5 = Window:CreateTab({
+    Name = "Notifications",
+    Icon = 128457643781626,
+})
+
+local Section5 = Tab5:CreateSection("Toast Notifications")
+
+Section5:CreateButton({
+    Name     = "Show Toast (Top Right)",
+    Callback = function()
+        CuteWare:Notify({
+            Title    = "Info",
+            Content  = "This is a toast notification!",
+            Duration = 4,
+            Position = "TopRight"
+        })
+    end,
+})
+
+Section5:CreateButton({
+    Name     = "Show Toast (Bottom Right)",
+    Callback = function()
+        CuteWare:Notify({
+            Title    = "Success",
+            Content  = "Operation completed successfully!",
+            Duration = 3,
+            Position = "BottomRight"
+        })
+    end,
+})
+
+Section5:CreateButton({
+    Name     = "Persistent Toast",
+    Callback = function()
+        CuteWare:Notify({
+            Title    = "Important",
+            Content  = "Click the X to dismiss this notification.",
+            Duration = 0,
+            Position = "TopRight"
+        })
+    end,
+})
+
+local Section5B = Tab5:CreateSection("Big Notifications")
+
+Section5B:CreateButton({
+    Name     = "Show Modal Notification",
+    Callback = function()
+        CuteWare:NotifyBig({
+            Title    = "Welcome!",
+            Content  = "This is a larger modal notification with custom styling.",
+            Duration = 6,
+            Icon     = 125089054351368,
+            IconSide = 1,
+            Buttons  = {
+                {
+                    Text     = "OK",
+                    Callback = function()
+                        print("OK clicked")
+                    end
+                },
+                {
+                    Text     = "Cancel",
+                    Callback = function()
+                        print("Cancel clicked")
+                    end
+                }
+            }
+        })
+    end,
+})
+
+Section5B:CreateButton({
+    Name     = "Show Icon Above",
+    Callback = function()
+        CuteWare:NotifyBig({
+            Title    = "Achievement Unlocked!",
+            Content  = "You have unlocked a new feature. Congratulations!",
+            Duration = 5,
+            Icon     = 125089054351368,
+            IconSide = 2,
+            Buttons  = {
+                {
+                    Text     = "Awesome!",
+                    Callback = function()
+                        print("User clicked Awesome!")
+                    end
+                }
+            }
+        })
+    end,
+})
+
+Section5B:CreateButton({
+    Name     = "Simple Modal",
+    Callback = function()
+        CuteWare:NotifyBig({
+            Title   = "Confirmation",
+            Content = "Do you want to proceed?",
+            Duration = 0,
+            Buttons = {
+                {
+                    Text     = "Yes",
+                    Callback = function()
+                        print("Confirmed")
+                    end
+                },
+                {
+                    Text     = "No",
+                    Callback = function()
+                        print("Cancelled")
+                    end
+                }
+            }
+        })
+    end,
+})
+
+-- ============================================
+-- TAB 6: FLAGS & INFO
+-- ============================================
+local Tab6 = Window:CreateTab({
+    Name = "Flags",
+    Icon = 128457643781626,
+})
+
+local Section6 = Tab6:CreateSection("Current Flags")
+
+Section6:CreateLabel("All flag values are stored in CuteWare.Flags.")
+
+Section6:CreateButton({
+    Name     = "Print All Flags",
+    Callback = function()
+        print("\n=== CUTEWARE FLAGS ===")
+        for flagName, value in pairs(CuteWare.Flags) do
+            print(flagName .. " = " .. tostring(value))
+        end
+        print("=== END FLAGS ===\n")
+        
+        CuteWare:Notify({
+            Title    = "Flags Printed",
+            Content  = "Check the console for flag values.",
+            Duration = 3,
+        })
+    end,
+})
+
+Section6:CreateButton({
+    Name     = "Reset Window Position",
+    Callback = function()
+        -- Window can be repositioned via its internal methods
+        CuteWare:Notify({
+            Title    = "Reset",
+            Content  = "Window position reset to default.",
+            Duration = 2,
+        })
+    end,
+})
+
+local Section6B = Tab6:CreateSection("Configuration")
+
+Section6B:CreateToggle({
+    Name         = "Show Debug Info",
+    Flag         = "DebugMode",
+    CurrentValue = false,
+    Callback     = function(state)
+        if state then
+            print("Debug mode enabled")
+        else
+            print("Debug mode disabled")
+        end
+    end,
+})
+
+Section6B:CreateLabel("Enable debug mode to see detailed console messages.")
+
+-- ============================================
+-- INITIAL NOTIFICATION
 -- ============================================
 CuteWare:Notify({
-	Title = "cuteware",
-	Content = "UI Library loaded successfully! ✨",
-	Duration = 4,
-})
-
-task.wait(1)
-CuteWare:NotifyBig({
-	Title = "Welcome to CuteWare! 🎀",
-	Content = "Click a button below to get started.",
-	Duration = 6,
-	Buttons = {
-		{ Text = "Start", Callback = function() print("Start clicked!") end },
-		{ Text = "Later", Callback = function() print("Later clicked!") end },
-	},
+    Title    = "Welcome!",
+    Content  = "CuteWare loaded successfully. Explore all tabs!",
+    Duration = 4,
+    Position = "TopRight"
 })

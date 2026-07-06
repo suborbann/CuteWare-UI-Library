@@ -1,4 +1,5 @@
 --[[
+
 ░█████╗░██╗░░░██╗████████╗███████╗░░░░░░░██╗░░░░░░░██╗░█████╗░██████╗░███████╗
 ██╔══██╗██║░░░██║╚══██╔══╝██╔════╝░░░░░░░██║░░██╗░░██║██╔══██╗██╔══██╗██╔════╝
 ██║░░╚═╝██║░░░██║░░░██║░░░█████╗░░█████╗░╚██╗████╗██╔╝███████║██████╔╝█████╗░░
@@ -611,7 +612,7 @@ function CuteWare:CreateWindow(config)
             BackgroundTransparency = 1, ImageTransparency = bgTransp,
             ScaleType = Enum.ScaleType.Crop, Size = UDim2.new(1, 0, 1, 0),
             ZIndex = 0, Parent = Main,
-        })
+        }, { corner(12) })
     end
 
     function Window:SetBackgroundImage(imageSource, transparency)
@@ -622,7 +623,7 @@ function CuteWare:CreateWindow(config)
                 Name = "CustomBackground", BackgroundTransparency = 1,
                 ScaleType = Enum.ScaleType.Crop, Size = UDim2.new(1, 0, 1, 0),
                 ZIndex = 0, Parent = Main,
-            })
+            }, { corner(12) })
         end
         BackgroundImage.Image = resolved
         BackgroundImage.ImageTransparency = transparency or bgTransp
@@ -784,11 +785,14 @@ function CuteWare:CreateWindow(config)
         for _, d in ipairs(Main:GetDescendants()) do
             if d:IsA("TextLabel") or d:IsA("TextButton") then
                 quickTween(d, { TextTransparency = 1 }, 0.22)
-            elseif d:IsA("Frame") and d.BackgroundTransparency < 1 then
+            elseif d:IsA("Frame") and d.BackgroundTransparency < 0.95 then
                 quickTween(d, { BackgroundTransparency = 1 }, 0.22)
-            elseif d:IsA("ImageLabel") then
+            elseif d:IsA("ImageLabel") and d ~= BackgroundImage then
                 quickTween(d, { ImageTransparency = 1 }, 0.22)
             end
+        end
+        if BackgroundImage then
+            quickTween(BackgroundImage, { ImageTransparency = 1 }, 0.22)
         end
         quickTween(Main, {
             Size = UDim2.new(0, windowSize.X.Offset * 0.9, 0, windowSize.Y.Offset * 0.9),
@@ -803,18 +807,24 @@ function CuteWare:CreateWindow(config)
         Main.BackgroundTransparency = 1
         for _, d in ipairs(Main:GetDescendants()) do
             if d:IsA("TextLabel") or d:IsA("TextButton") then d.TextTransparency = 1 end
-            if d:IsA("Frame") and d.BackgroundTransparency < 1 then d.BackgroundTransparency = 1 end
+            if d:IsA("Frame") and d.BackgroundTransparency < 0.95 then d.BackgroundTransparency = 1 end
             if d:IsA("ImageLabel") then d.ImageTransparency = 1 end
         end
         tween(Main, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
             Size = windowSize, BackgroundTransparency = 0,
         })
-        task.delay(0.1, function()
-            if TopBar then quickTween(TopBar, { BackgroundTransparency = bgImage and 0.6 or 0 }, 0.2) end
+        task.delay(0.15, function()
+            if TopBar then quickTween(TopBar, { BackgroundTransparency = bgImage and 0.6 or 0 }, 0.25) end
+            if TabListShell then quickTween(TabListShell, { BackgroundTransparency = bgImage and 0.65 or 0 }, 0.25) end
+            if BackgroundImage then quickTween(BackgroundImage, { ImageTransparency = bgTransp }, 0.25) end
             for _, d in ipairs(Main:GetDescendants()) do
-                if d:IsA("TextLabel") or d:IsA("TextButton") then quickTween(d, { TextTransparency = 0 }, 0.2) end
-                if d:IsA("Frame") and d.BackgroundTransparency == 1 and d ~= TopBar and d ~= TabListShell then quickTween(d, { BackgroundTransparency = 0 }, 0.2) end
-                if d:IsA("ImageLabel") and d ~= BackgroundImage then quickTween(d, { ImageTransparency = 0 }, 0.2) end
+                if d:IsA("TextLabel") or d:IsA("TextButton") then 
+                    quickTween(d, { TextTransparency = 0 }, 0.25) 
+                elseif d:IsA("Frame") and d.BackgroundTransparency >= 0.95 and d ~= TopBar and d ~= TabListShell then 
+                    quickTween(d, { BackgroundTransparency = d.BackgroundTransparency < 0.5 and d.BackgroundTransparency or 0 }, 0.25) 
+                elseif d:IsA("ImageLabel") and d ~= BackgroundImage then 
+                    quickTween(d, { ImageTransparency = 0 }, 0.25) 
+                end
             end
         end)
     end

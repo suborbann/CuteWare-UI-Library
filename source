@@ -161,7 +161,7 @@ local function spawnRipple(button, relX, relY, color, fillDuration, rippleZIndex
         AnchorPoint = Vector2.new(0.5, 0.5),
         ZIndex = rippleZIndex or ((button.ZIndex or 1) + 1),
         Parent = button,
-    }, { corner(9999) })
+    }, { corner(8) })  -- Изменено на 8, чтобы соответствовать углам табов/кнопок
     tween(circle, TweenInfo.new(fillDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         Size = UDim2.new(0, diameter, 0, diameter),
         BackgroundTransparency = 1,
@@ -358,7 +358,8 @@ function CuteWare:CreateKeySystem(config)
         if config.OnClose then
             config.OnClose()
         else
-            error("[CuteWare] Key system closed without a valid key.", 0)
+            -- Скрипт не открывается при закрытии кей-системы крестиком
+            return false
         end
         return false
     end
@@ -606,7 +607,7 @@ function CuteWare:CreateWindow(config)
     local titleIcon  = resolveImage(config.Icon)
     local bgImage    = resolveImage(config.BackgroundImage)
     local bgTransp   = config.BackgroundImageTransparency or 0.75
-    local useComponentGradient = bgImage and (config.ComponentGradient ~= false) -- по умолчанию включено при bgImage
+    local useComponentGradient = bgImage and (config.ComponentGradient ~= false)
 
     local TOPBAR_H = 38
     local MIN_SIZE = UDim2.new(0, 200, 0, TOPBAR_H)
@@ -1136,6 +1137,23 @@ function CuteWare:CreateWindow(config)
 
             local Section = { Holder = SH }
 
+            local function addComponentGradient(comp)
+                if useComponentGradient and comp.BackgroundColor3 then
+                    local gradient = create("UIGradient", {
+                        Color = ColorSequence.new{
+                            ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+                            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255))
+                        },
+                        Transparency = NumberSequence.new{
+                            NumberSequenceKeypoint.new(0, 0.7),
+                            NumberSequenceKeypoint.new(1, 0.85)
+                        },
+                        Rotation = 90
+                    })
+                    gradient.Parent = comp
+                end
+            end
+
             function Section:CreateButton(c)
                 c = c or {}
                 local Btn = create("TextButton", {
@@ -1144,6 +1162,7 @@ function CuteWare:CreateWindow(config)
                     BackgroundTransparency = bgImage and 0.5 or 0,
                     Size = UDim2.new(1, 0, 0, 34), Parent = SH,
                 }, { corner(8) })
+                addComponentGradient(Btn)
                 Btn.MouseEnter:Connect(function() quickTween(Btn, { BackgroundColor3 = darken(Theme.Tertiary, 0.75) }, 0.15) end)
                 Btn.MouseLeave:Connect(function() quickTween(Btn, { BackgroundColor3 = Theme.Tertiary }, 0.15) end)
                 Btn.MouseButton1Down:Connect(function() quickTween(Btn, { Size = UDim2.new(1, -6, 0, 32) }, 0.08) end)
@@ -1177,6 +1196,7 @@ function CuteWare:CreateWindow(config)
                     BackgroundTransparency = bgImage and 0.3 or 0,
                     Size = UDim2.new(0, 48, 0, 24), Position = UDim2.new(1, -48, 0.5, -12), Parent = H,
                 }, { corner(6) })
+                addComponentGradient(Sw)
                 local Kn = create("Frame", {
                     BackgroundColor3 = Color3.fromRGB(255, 255, 255),
                     Size = UDim2.new(0, 20, 0, 20),
@@ -1220,6 +1240,7 @@ function CuteWare:CreateWindow(config)
                     BackgroundTransparency = bgImage and 0.4 or 0,
                     Position = UDim2.new(0, 0, 0, 26), Size = UDim2.new(1, 0, 0, 8), Parent = H,
                 }, { corner(4) })
+                addComponentGradient(Bar)
                 local Fill = create("Frame", {
                     BackgroundColor3 = Theme.Accent,
                     Size = UDim2.new((val - mn) / (mx - mn), 0, 1, 0), Parent = Bar,
@@ -1289,6 +1310,7 @@ function CuteWare:CreateWindow(config)
                     BackgroundTransparency = bgImage and 0.4 or 0,
                     Position = UDim2.new(0, 0, 0, 22), Size = UDim2.new(1, 0, 0, 32), Parent = H,
                 }, { corner(8) })
+                addComponentGradient(Box)
                 Box.MouseEnter:Connect(function() if not open then quickTween(Box, { BackgroundColor3 = darken(Theme.Tertiary, 0.75) }, 0.15) end end)
                 Box.MouseLeave:Connect(function() if not open then quickTween(Box, { BackgroundColor3 = Theme.Tertiary }, 0.15) end end)
 
@@ -1542,6 +1564,7 @@ function CuteWare:CreateWindow(config)
                     BackgroundTransparency = bgImage and 0.4 or 0,
                     Position = UDim2.new(0, 0, 0, 22), Size = UDim2.new(1, 0, 0, 30), Parent = H,
                 }, { corner(8) })
+                addComponentGradient(Box)
                 local Input = create("TextBox", {
                     Text = c.CurrentValue or "", PlaceholderText = c.PlaceholderText or "Enter text...",
                     Font = Theme.Font, TextSize = 13, TextColor3 = Theme.Text,
@@ -1575,6 +1598,7 @@ function CuteWare:CreateWindow(config)
                     BackgroundTransparency = bgImage and 0.4 or 0,
                     Size = UDim2.new(0, 70, 0, 26), Position = UDim2.new(1, -70, 0.5, -13), Parent = H,
                 }, { corner(6) })
+                addComponentGradient(KB)
                 KB.MouseButton1Click:Connect(function()
                     listening = true; KB.Text = "..."
                     quickTween(KB, { BackgroundColor3 = Theme.Accent }, 0.12)

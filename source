@@ -30,7 +30,7 @@ local Theme = {
     Stroke     = Color3.fromRGB(58, 58, 68),
     Accent     = Color3.fromRGB(255, 130, 180),
     AccentDark = Color3.fromRGB(200, 90, 140),
-    Text       = Color3.fromRGB(240, 240, 245),
+    Text       = Color3.fromRGB(255, 255, 255), -- Белый цвет текста кнопок
     SubText    = Color3.fromRGB(165, 165, 175),
     Success    = Color3.fromRGB(120, 220, 150),
     Error      = Color3.fromRGB(230, 90, 100),
@@ -161,7 +161,7 @@ local function spawnRipple(button, relX, relY, color, fillDuration, rippleZIndex
         AnchorPoint = Vector2.new(0.5, 0.5),
         ZIndex = rippleZIndex or ((button.ZIndex or 1) + 1),
         Parent = button,
-    }, { corner(8) })  -- Изменено на 8, чтобы соответствовать углам табов/кнопок
+    }, { corner(999) })  -- Полностью круглые углы для ripple эффекта
     tween(circle, TweenInfo.new(fillDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         Size = UDim2.new(0, diameter, 0, diameter),
         BackgroundTransparency = 1,
@@ -355,12 +355,7 @@ function CuteWare:CreateKeySystem(config)
     Overlay:Destroy()
 
     if closedManually and not approved then
-        if config.OnClose then
-            config.OnClose()
-        else
-            -- Скрипт не открывается при закрытии кей-системы крестиком
-            return false
-        end
+        -- Просто закрываем кей-систему, главное окно НЕ загружается
         return false
     end
     return true
@@ -1112,7 +1107,7 @@ function CuteWare:CreateWindow(config)
                 create("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }),
             })
 
-            -- Добавляем градиент для компонентов при наличии bgImage
+            -- Градиент ТОЛЬКО на фон секции (квадрат под компонентами)
             if useComponentGradient then
                 local gradient = create("UIGradient", {
                     Color = ColorSequence.new{
@@ -1138,20 +1133,7 @@ function CuteWare:CreateWindow(config)
             local Section = { Holder = SH }
 
             local function addComponentGradient(comp)
-                if useComponentGradient and comp.BackgroundColor3 then
-                    local gradient = create("UIGradient", {
-                        Color = ColorSequence.new{
-                            ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-                            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255))
-                        },
-                        Transparency = NumberSequence.new{
-                            NumberSequenceKeypoint.new(0, 0.7),
-                            NumberSequenceKeypoint.new(1, 0.85)
-                        },
-                        Rotation = 90
-                    })
-                    gradient.Parent = comp
-                end
+                -- Градиент только на фон секции, убираем с отдельных компонентов
             end
 
             function Section:CreateButton(c)

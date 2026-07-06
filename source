@@ -7,11 +7,6 @@
 ╚█████╔╝╚██████╔╝░░░██║░░░███████╗░░░░░░░░╚██╔╝░╚██╔╝░██║░░██║██║░░██║███████╗
 ░╚════╝░░╚═════╝░░░░╚═╝░░░╚══════╝░░░░░░░░░╚═╝░░░╚═╝░░╚═╝░░╚═╝╚═╝░░╚═╝╚══════╝
                                            https://dsc.gg/cuteware
-
-  Fixes:
-   1) Toggle-key hide/show (RCtrl) breaking the window layout.
-   2) Corner "mask" squares not respecting parent transparency.
-   3) Minimize -> hide -> show sequence corrupting window state.
 --]]
 
 local TweenService     = game:GetService("TweenService")
@@ -90,11 +85,7 @@ local function pointInside(frame, pos)
 end
 
 -- PATCH #2: masks now sync their transparency (and color) live with the
--- panel they belong to, instead of being frozen at creation time. This
--- fixes the "small squares where transparency doesn't work" bug — before,
--- these corner-covering frames stayed fully opaque even when the parent
--- panel (e.g. TopBar / TabListShell) became semi-transparent, e.g. because
--- of a background image or during open/close tweens.
+-- panel they belong to, instead of being frozen at creation time.
 local function applyPanelCorners(panel, radius, keep)
     corner(radius).Parent = panel
     local col = panel.BackgroundColor3
@@ -632,6 +623,24 @@ function CuteWare:CreateWindow(config)
     }, { corner(12), stroke(Theme.Stroke, 1) })
     self._mainFrame = Main
 
+    -- FadeCover: a single opaque overlay used ONLY to mask the open/close
+    -- transition. Instead of walking every descendant and toggling its
+    -- transparency (which corrupted internal state like which tab was
+    -- active, open dropdowns, toggle states, etc. and caused the "greyed
+    -- out / broken layout" bug on reopen), we just fade this cover in
+    -- front of everything, hide/show Main underneath it, then fade it
+    -- back out. Nothing inside Main is ever touched.
+    local FadeCover = create("Frame", {
+        Name = "FadeCover",
+        BackgroundColor3 = Theme.Background,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 1, 0),
+        ZIndex = 1000,
+        Active = true,
+        Visible = false,
+        Parent = Main,
+    }, { corner(12) })
+
     local BackgroundImage
     if bgImage then
         BackgroundImage = create("ImageLabel", {
@@ -802,14 +811,6 @@ function CuteWare:CreateWindow(config)
     end)
 
     --------------------------------------------------------------------
-    -- PATCH #1 & #3: Close()/Open() now compute their target size from
-    -- the *current* window state (normal / minimized / maximized)
-    -- instead of always assuming the base windowSize. Previously,
-    -- toggling the window with the keybind (or hiding right after
-    -- minimizing) always forced the window back to its full size while
-    -- leaving the tab list hidden (from the minimize), corrupting the
-    -- visual state.
-    --------------------------------------------------------------------
     local function currentTargetSizePos()
         if maximized then
             return UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0)
@@ -820,28 +821,16 @@ function CuteWare:CreateWindow(config)
         end
     end
 
-    function Window:Close()
-        local targets = {Main, TopBar, TabListShell}
-        for _, t in ipairs(targets) do
-            if t then
-                quickTween(t, { BackgroundTransparency = 1 }, 0.22)
-            end
-        end
-        for _, d in ipairs(Main:GetDescendants()) do
-            if d:IsA("TextLabel") or d:IsA("TextButton") then
-                quickTween(d, { TextTransparency = 1 }, 0.22)
-            elseif d:IsA("Frame") and d.BackgroundTransparency < 0.95 then
-                quickTween(d, { BackgroundTransparency = 1 }, 0.22)
-            elseif d:IsA("ImageLabel") and d ~= BackgroundImage then
-                quickTween(d, { ImageTransparency = 1 }, 0.22)
-            end
-        end
-        if BackgroundImage then
-            quickTween(BackgroundImage, { ImageTransparency = 1 }, 0.22)
-        end
+    local transitioning = false
 
-        -- shrink from whatever size the window is ACTUALLY at right now
-        -- (normal / minimized / maximized), not the base windowSize.
+    function Window:Close()
+        if transitioning then return end
+        transitioning = true
+
+        FadeCover.Visible = true
+        FadeCover.BackgroundTransparency = 1
+        quickTween(FadeCover, { BackgroundTransparency = 0 }, 0.2)
+
         local curSize = Main.Size
         quickTween(Main, {
             Size = UDim2.new(
@@ -849,45 +838,41 @@ function CuteWare:CreateWindow(config)
                 curSize.Y.Scale, curSize.Y.Offset * 0.9
             ),
         }, 0.22)
-        task.wait(0.25)
+
+        task.wait(0.22)
         Main.Visible = false
+        transitioning = false
     end
 
     function Window:Open()
+        if transitioning then return end
+        transitioning = true
+
         Main.Visible = true
 
         local targetSize, targetPos = currentTargetSizePos()
+
+        FadeCover.Visible = true
+        FadeCover.BackgroundTransparency = 0
 
         Main.Size = UDim2.new(
             targetSize.X.Scale, targetSize.X.Offset * 0.9,
             targetSize.Y.Scale, targetSize.Y.Offset * 0.9
         )
         Main.Position = targetPos
-        Main.BackgroundTransparency = 1
-        for _, d in ipairs(Main:GetDescendants()) do
-            if d:IsA("TextLabel") or d:IsA("TextButton") then d.TextTransparency = 1 end
-            if d:IsA("Frame") and d.BackgroundTransparency < 0.95 then d.BackgroundTransparency = 1 end
-            if d:IsA("ImageLabel") then d.ImageTransparency = 1 end
-        end
+
         tween(Main, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-            Size = targetSize, Position = targetPos, BackgroundTransparency = 0,
+            Size = targetSize, Position = targetPos,
         })
-        task.delay(0.15, function()
-            if TopBar then quickTween(TopBar, { BackgroundTransparency = bgImage and 0.6 or 0 }, 0.25) end
-            if TabListShell and not minimized then
-                quickTween(TabListShell, { BackgroundTransparency = bgImage and 0.65 or 0 }, 0.25)
-            end
-            if BackgroundImage then quickTween(BackgroundImage, { ImageTransparency = bgTransp }, 0.25) end
-            for _, d in ipairs(Main:GetDescendants()) do
-                if d:IsA("TextLabel") or d:IsA("TextButton") then
-                    quickTween(d, { TextTransparency = 0 }, 0.25)
-                elseif d:IsA("Frame") and d.BackgroundTransparency >= 0.95 and d ~= TopBar and d ~= TabListShell then
-                    quickTween(d, { BackgroundTransparency = d.BackgroundTransparency < 0.5 and d.BackgroundTransparency or 0 }, 0.25)
-                elseif d:IsA("ImageLabel") and d ~= BackgroundImage then
-                    quickTween(d, { ImageTransparency = 0 }, 0.25)
-                end
-            end
+
+        task.delay(0.12, function()
+            quickTween(FadeCover, { BackgroundTransparency = 1 }, 0.22)
+            task.delay(0.24, function()
+                FadeCover.Visible = false
+            end)
         end)
+
+        task.delay(0.3, function() transitioning = false end)
     end
 
     CloseBtn.MouseButton1Click:Connect(function()

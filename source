@@ -8,7 +8,6 @@
 ░╚════╝░░╚═════╝░░░░╚═╝░░░╚══════╝░░░░░░░░░╚═╝░░░╚═╝░░╚═╝░░╚═╝╚═╝░░╚═╝╚══════╝
                                            https://dsc.gg/cuteware
 
-  == PATCHED VERSION ==
   Fixes:
    1) Toggle-key hide/show (RCtrl) breaking the window layout.
    2) Corner "mask" squares not respecting parent transparency.
@@ -92,8 +91,13 @@ end
 
 -- PATCH #2: masks now sync their transparency (and color) live with the
 -- panel they belong to, instead of being frozen at creation time.
-local function applyPanelCorners(panel, radius, keep)
+-- `skipMasks`, when true, only applies the UICorner and skips creating the
+-- corner-mask frames entirely (used when a background image is active, so
+-- the image isn't chopped up by square mask patches).
+local function applyPanelCorners(panel, radius, keep, skipMasks)
     corner(radius).Parent = panel
+    if skipMasks then return {} end
+
     local col = panel.BackgroundColor3
     local masks = {}
     local function mask(name, pos)
@@ -102,7 +106,7 @@ local function applyPanelCorners(panel, radius, keep)
             BackgroundTransparency = panel.BackgroundTransparency,
             BorderSizePixel = 0,
             Position = pos, Size = UDim2.new(0, radius, 0, radius),
-            ZIndex = (panel.ZIndex or 1), Parent = panel,
+            ZIndex = (panel.ZIndex or 1) + 10, Parent = panel,
         })
         masks[name] = m
     end
@@ -194,6 +198,15 @@ local KeybindMap = {
 local CuteWare = {}
 CuteWare.__index = CuteWare
 CuteWare.Flags  = {}
+
+-- Change the global accent color used by every window/component created
+-- from this point onward. Pass a second color for the darker hover/press
+-- shade, or leave it out to have one derived automatically.
+function CuteWare:SetAccentColor(color, darkColor)
+    if not color then return end
+    Theme.Accent = color
+    Theme.AccentDark = darkColor or darken(color, 0.8)
+end
 
 function CuteWare:Init()
     local ex = PlayerGui:FindFirstChild("CuteWare")
@@ -606,12 +619,29 @@ end
 --------------------------------------------------------------------
 function CuteWare:CreateWindow(config)
     config = config or {}
+
+    -- ACCENT COLOR OVERRIDE: lets the caller swap out the default pink
+    -- accent for anything else. Applies globally (affects every widget
+    -- created from here on), matching how Theme is already shared.
+    if config.AccentColor then
+        CuteWare:SetAccentColor(config.AccentColor, config.AccentColorDark)
+    end
+
     local windowName = config.Name    or "CuteWare"
     local subtitle   = config.Subtitle
     local size       = config.Size    or UDim2.new(0, 560, 0, 380)
     local titleIcon  = resolveImage(config.Icon)
     local bgImage    = resolveImage(config.BackgroundImage)
     local bgTransp   = config.BackgroundImageTransparency or 0.75
+
+    -- GRADIENT OVERLAY SETTINGS: a white translucent wash placed above the
+    -- background image (but below the UI panels), so text/components stay
+    -- readable. Only kicks in automatically once a background image exists,
+    -- but can be forced on/off via config.GradientOverlay.
+    local gradientEnabled = config.GradientOverlay
+    if gradientEnabled == nil then gradientEnabled = bgImage ~= nil end
+    local gradientTransparency = config.GradientTransparency or 0.82
+    local gradientAngle        = config.GradientAngle or 90
 
     local TOPBAR_H = 38
     local MIN_SIZE = UDim2.new(0, 200, 0, TOPBAR_H)
@@ -657,6 +687,49 @@ function CuteWare:CreateWindow(config)
         }, { corner(12) })
     end
 
+    -- White gradient wash. Sits above the background image (ZIndex 0.. below
+    -- everything else) and below all interactive UI. Toggled by
+    -- gradientEnabled, and lives independently of BackgroundImage so it can
+    -- be created/removed later via Window:SetGradientOverlay.
+    local GradientOverlay
+    local function buildGradientOverlay()
+        GradientOverlay = create("Frame", {
+            Name = "GradientOverlay",
+            BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+            BackgroundTransparency = gradientTransparency,
+            Size = UDim2.new(1, 0, 1, 0),
+            ZIndex = 0,
+            Parent = Main,
+        }, { corner(12) })
+        create("UIGradient", {
+            Transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, 0),
+                NumberSequenceKeypoint.new(1, 0.5),
+            }),
+            Rotation = gradientAngle,
+        }).Parent = GradientOverlay
+        if BackgroundImage then GradientOverlay:MoveAbove(BackgroundImage) end
+    end
+    if gradientEnabled and bgImage then
+        buildGradientOverlay()
+    end
+
+    function Window:SetGradientOverlay(enabled, transparency, angle)
+        gradientEnabled = enabled
+        if transparency then gradientTransparency = transparency end
+        if angle then gradientAngle = angle end
+        if enabled then
+            if GradientOverlay then
+                GradientOverlay.BackgroundTransparency = gradientTransparency
+                GradientOverlay.Visible = true
+            else
+                buildGradientOverlay()
+            end
+        elseif GradientOverlay then
+            GradientOverlay.Visible = false
+        end
+    end
+
     function Window:SetBackgroundImage(imageSource, transparency)
         local resolved = resolveImage(imageSource)
         if not resolved then return end
@@ -669,6 +742,12 @@ function CuteWare:CreateWindow(config)
         end
         BackgroundImage.Image = resolved
         BackgroundImage.ImageTransparency = transparency or bgTransp
+        bgImage = resolved
+        if gradientEnabled and not GradientOverlay then
+            buildGradientOverlay()
+        elseif GradientOverlay then
+            GradientOverlay:MoveAbove(BackgroundImage)
+        end
     end
 
     Main.Size = UDim2.new(0, size.X.Offset * 0.4, 0, size.Y.Offset * 0.4)
@@ -687,7 +766,9 @@ function CuteWare:CreateWindow(config)
         Size = UDim2.new(1, 0, 0, TOPBAR_H),
         Parent = Main,
     })
-    local topBarMasks = applyPanelCorners(TopBar, 12, { TopLeft = true, TopRight = true, BottomLeft = false, BottomRight = false })
+    -- Corner masks are skipped when a background image is present so the
+    -- image isn't interrupted by square mask patches at the top corners.
+    local topBarMasks = applyPanelCorners(TopBar, 12, { TopLeft = true, TopRight = true, BottomLeft = false, BottomRight = false }, bgImage ~= nil)
 
     local titleOffset = 16
     if titleIcon then
@@ -775,8 +856,8 @@ function CuteWare:CreateWindow(config)
     end
 
     local function setMinVisual(isMin)
-        topBarMasks.MaskBL.Visible = not isMin
-        topBarMasks.MaskBR.Visible = not isMin
+        if topBarMasks.MaskBL then topBarMasks.MaskBL.Visible = not isMin end
+        if topBarMasks.MaskBR then topBarMasks.MaskBR.Visible = not isMin end
         MinBtn.Text = isMin and "▲" or "—"
         if isMin then hideCtrlBtns() else showCtrlBtns() end
     end
@@ -970,7 +1051,9 @@ function CuteWare:CreateWindow(config)
         Size = UDim2.new(0, 140, 1, -TOPBAR_H),
         Parent = Main,
     })
-    applyPanelCorners(TabListShell, 12, { TopLeft = false, TopRight = false, BottomLeft = true, BottomRight = false })
+    -- Same as TopBar: skip the square corner masks once a background image
+    -- is active.
+    applyPanelCorners(TabListShell, 12, { TopLeft = false, TopRight = false, BottomLeft = true, BottomRight = false }, bgImage ~= nil)
 
     local TabList = create("Frame", {
         BackgroundTransparency = 1,
@@ -1017,6 +1100,10 @@ function CuteWare:CreateWindow(config)
         tabConfig = tabConfig or {}
         local tabName = tabConfig.Name or "Tab"
 
+        -- Slightly more transparent when a background image is showing, so
+        -- the tab list doesn't look like a solid opaque block over the art.
+        local tabActiveTransparency = bgImage and 0.35 or 0
+
         local TabBtn = create("TextButton", {
             Text = "",
             BackgroundColor3 = Theme.Tertiary,
@@ -1025,7 +1112,14 @@ function CuteWare:CreateWindow(config)
             ClipsDescendants = true,
             ZIndex = 2,
             Parent = TabList,
-        }, { corner(8) })
+        })
+        -- Corner masks here specifically fix the ripple click-effect: Roblox's
+        -- ClipsDescendants clips to the rectangular bounds only (it ignores
+        -- UICorner), so the round ripple can still poke sharp corners past
+        -- the rounded silhouette. These masks track TabBtn's own
+        -- color/transparency live, so they stay invisible while the tab is
+        -- inactive and only mask the corners once it lights up.
+        applyPanelCorners(TabBtn, 8, {})
 
         local TabLabel = create("TextLabel", {
             Text = tabName, Font = Theme.Font, TextSize = 14,
@@ -1086,7 +1180,7 @@ function CuteWare:CreateWindow(config)
                 end
             end
 
-            quickTween(TabBtn,   { BackgroundTransparency = 0 }, 0.15)
+            quickTween(TabBtn,   { BackgroundTransparency = tabActiveTransparency }, 0.15)
             quickTween(TabLabel, { TextColor3 = Theme.Text }, 0.15)
 
             local rx = clickX or TabBtn.AbsoluteSize.X / 2

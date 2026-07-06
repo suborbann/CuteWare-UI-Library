@@ -7,6 +7,11 @@
 ╚█████╔╝╚██████╔╝░░░██║░░░███████╗░░░░░░░░╚██╔╝░╚██╔╝░██║░░██║██║░░██║███████╗
 ░╚════╝░░╚═════╝░░░░╚═╝░░░╚══════╝░░░░░░░░░╚═╝░░░╚═╝░░╚═╝░░╚═╝╚═╝░░╚═╝╚══════╝
                                            https://dsc.gg/cuteware
+
+  Fixes:
+   1) Toggle-key hide/show (RCtrl) breaking the window layout.
+   2) Corner "mask" squares not respecting parent transparency.
+   3) Minimize -> hide -> show sequence corrupting window state.
 --]]
 
 local TweenService     = game:GetService("TweenService")
@@ -84,13 +89,21 @@ local function pointInside(frame, pos)
     return pos.X >= a.X and pos.X <= a.X + sz.X and pos.Y >= a.Y and pos.Y <= a.Y + sz.Y
 end
 
+-- PATCH #2: masks now sync their transparency (and color) live with the
+-- panel they belong to, instead of being frozen at creation time. This
+-- fixes the "small squares where transparency doesn't work" bug — before,
+-- these corner-covering frames stayed fully opaque even when the parent
+-- panel (e.g. TopBar / TabListShell) became semi-transparent, e.g. because
+-- of a background image or during open/close tweens.
 local function applyPanelCorners(panel, radius, keep)
     corner(radius).Parent = panel
     local col = panel.BackgroundColor3
     local masks = {}
     local function mask(name, pos)
         local m = create("Frame", {
-            Name = name, BackgroundColor3 = col, BorderSizePixel = 0,
+            Name = name, BackgroundColor3 = col,
+            BackgroundTransparency = panel.BackgroundTransparency,
+            BorderSizePixel = 0,
             Position = pos, Size = UDim2.new(0, radius, 0, radius),
             ZIndex = (panel.ZIndex or 1), Parent = panel,
         })
@@ -100,6 +113,19 @@ local function applyPanelCorners(panel, radius, keep)
     if not keep.TopRight   then mask("MaskTR", UDim2.new(1, -radius, 0, 0)) end
     if not keep.BottomLeft then mask("MaskBL", UDim2.new(0, 0, 1, -radius)) end
     if not keep.BottomRight then mask("MaskBR", UDim2.new(1, -radius, 1, -radius)) end
+
+    local function sync()
+        local t = panel.BackgroundTransparency
+        local c = panel.BackgroundColor3
+        for _, m in pairs(masks) do
+            m.BackgroundTransparency = t
+            m.BackgroundColor3 = c
+        end
+    end
+    panel:GetPropertyChangedSignal("BackgroundTransparency"):Connect(sync)
+    panel:GetPropertyChangedSignal("BackgroundColor3"):Connect(sync)
+    sync()
+
     return masks
 end
 
@@ -591,6 +617,7 @@ function CuteWare:CreateWindow(config)
     local bgTransp   = config.BackgroundImageTransparency or 0.75
 
     local TOPBAR_H = 38
+    local MIN_SIZE = UDim2.new(0, 200, 0, TOPBAR_H)
 
     local Window = {}
     Window.Tabs = {}
@@ -748,7 +775,7 @@ function CuteWare:CreateWindow(config)
         if minimized then
             TabListShell.Visible = false
             ContentArea.Visible  = false
-            quickTween(Main, { Size = UDim2.new(0, 200, 0, TOPBAR_H) }, 0.28)
+            quickTween(Main, { Size = MIN_SIZE }, 0.28)
         else
             TabListShell.Visible = true
             ContentArea.Visible  = true
@@ -775,6 +802,24 @@ function CuteWare:CreateWindow(config)
     end)
 
     --------------------------------------------------------------------
+    -- PATCH #1 & #3: Close()/Open() now compute their target size from
+    -- the *current* window state (normal / minimized / maximized)
+    -- instead of always assuming the base windowSize. Previously,
+    -- toggling the window with the keybind (or hiding right after
+    -- minimizing) always forced the window back to its full size while
+    -- leaving the tab list hidden (from the minimize), corrupting the
+    -- visual state.
+    --------------------------------------------------------------------
+    local function currentTargetSizePos()
+        if maximized then
+            return UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0)
+        elseif minimized then
+            return MIN_SIZE, windowPos
+        else
+            return windowSize, windowPos
+        end
+    end
+
     function Window:Close()
         local targets = {Main, TopBar, TabListShell}
         for _, t in ipairs(targets) do
@@ -794,8 +839,15 @@ function CuteWare:CreateWindow(config)
         if BackgroundImage then
             quickTween(BackgroundImage, { ImageTransparency = 1 }, 0.22)
         end
+
+        -- shrink from whatever size the window is ACTUALLY at right now
+        -- (normal / minimized / maximized), not the base windowSize.
+        local curSize = Main.Size
         quickTween(Main, {
-            Size = UDim2.new(0, windowSize.X.Offset * 0.9, 0, windowSize.Y.Offset * 0.9),
+            Size = UDim2.new(
+                curSize.X.Scale, curSize.X.Offset * 0.9,
+                curSize.Y.Scale, curSize.Y.Offset * 0.9
+            ),
         }, 0.22)
         task.wait(0.25)
         Main.Visible = false
@@ -803,7 +855,14 @@ function CuteWare:CreateWindow(config)
 
     function Window:Open()
         Main.Visible = true
-        Main.Size = UDim2.new(0, windowSize.X.Offset * 0.9, 0, windowSize.Y.Offset * 0.9)
+
+        local targetSize, targetPos = currentTargetSizePos()
+
+        Main.Size = UDim2.new(
+            targetSize.X.Scale, targetSize.X.Offset * 0.9,
+            targetSize.Y.Scale, targetSize.Y.Offset * 0.9
+        )
+        Main.Position = targetPos
         Main.BackgroundTransparency = 1
         for _, d in ipairs(Main:GetDescendants()) do
             if d:IsA("TextLabel") or d:IsA("TextButton") then d.TextTransparency = 1 end
@@ -811,19 +870,21 @@ function CuteWare:CreateWindow(config)
             if d:IsA("ImageLabel") then d.ImageTransparency = 1 end
         end
         tween(Main, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-            Size = windowSize, BackgroundTransparency = 0,
+            Size = targetSize, Position = targetPos, BackgroundTransparency = 0,
         })
         task.delay(0.15, function()
             if TopBar then quickTween(TopBar, { BackgroundTransparency = bgImage and 0.6 or 0 }, 0.25) end
-            if TabListShell then quickTween(TabListShell, { BackgroundTransparency = bgImage and 0.65 or 0 }, 0.25) end
+            if TabListShell and not minimized then
+                quickTween(TabListShell, { BackgroundTransparency = bgImage and 0.65 or 0 }, 0.25)
+            end
             if BackgroundImage then quickTween(BackgroundImage, { ImageTransparency = bgTransp }, 0.25) end
             for _, d in ipairs(Main:GetDescendants()) do
-                if d:IsA("TextLabel") or d:IsA("TextButton") then 
-                    quickTween(d, { TextTransparency = 0 }, 0.25) 
-                elseif d:IsA("Frame") and d.BackgroundTransparency >= 0.95 and d ~= TopBar and d ~= TabListShell then 
-                    quickTween(d, { BackgroundTransparency = d.BackgroundTransparency < 0.5 and d.BackgroundTransparency or 0 }, 0.25) 
-                elseif d:IsA("ImageLabel") and d ~= BackgroundImage then 
-                    quickTween(d, { ImageTransparency = 0 }, 0.25) 
+                if d:IsA("TextLabel") or d:IsA("TextButton") then
+                    quickTween(d, { TextTransparency = 0 }, 0.25)
+                elseif d:IsA("Frame") and d.BackgroundTransparency >= 0.95 and d ~= TopBar and d ~= TabListShell then
+                    quickTween(d, { BackgroundTransparency = d.BackgroundTransparency < 0.5 and d.BackgroundTransparency or 0 }, 0.25)
+                elseif d:IsA("ImageLabel") and d ~= BackgroundImage then
+                    quickTween(d, { ImageTransparency = 0 }, 0.25)
                 end
             end
         end)

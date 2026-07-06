@@ -7,6 +7,12 @@
 ╚█████╔╝╚██████╔╝░░░██║░░░███████╗░░░░░░░░╚██╔╝░╚██╔╝░██║░░██║██║░░██║███████╗
 ░╚════╝░░╚═════╝░░░░╚═╝░░░╚══════╝░░░░░░░░░╚═╝░░░╚═╝░░╚═╝░░╚═╝╚═╝░░╚═╝╚══════╝
                                            https://dsc.gg/cuteware
+
+  == PATCHED VERSION ==
+  Fixes:
+   1) Toggle-key hide/show (RCtrl) breaking the window layout.
+   2) Corner "mask" squares not respecting parent transparency.
+   3) Minimize -> hide -> show sequence corrupting window state.
 --]]
 
 local TweenService     = game:GetService("TweenService")
@@ -30,7 +36,7 @@ local Theme = {
     Stroke     = Color3.fromRGB(58, 58, 68),
     Accent     = Color3.fromRGB(255, 130, 180),
     AccentDark = Color3.fromRGB(200, 90, 140),
-    Text       = Color3.fromRGB(255, 255, 255), -- Белый цвет текста кнопок
+    Text       = Color3.fromRGB(240, 240, 245),
     SubText    = Color3.fromRGB(165, 165, 175),
     Success    = Color3.fromRGB(120, 220, 150),
     Error      = Color3.fromRGB(230, 90, 100),
@@ -86,14 +92,14 @@ end
 
 -- PATCH #2: masks now sync their transparency (and color) live with the
 -- panel they belong to, instead of being frozen at creation time.
-local function applyPanelCorners(panel, radius, keep, bgImage)
+local function applyPanelCorners(panel, radius, keep)
     corner(radius).Parent = panel
     local col = panel.BackgroundColor3
     local masks = {}
     local function mask(name, pos)
         local m = create("Frame", {
             Name = name, BackgroundColor3 = col,
-            BackgroundTransparency = bgImage and 1 or panel.BackgroundTransparency,
+            BackgroundTransparency = panel.BackgroundTransparency,
             BorderSizePixel = 0,
             Position = pos, Size = UDim2.new(0, radius, 0, radius),
             ZIndex = (panel.ZIndex or 1), Parent = panel,
@@ -109,7 +115,7 @@ local function applyPanelCorners(panel, radius, keep, bgImage)
         local t = panel.BackgroundTransparency
         local c = panel.BackgroundColor3
         for _, m in pairs(masks) do
-            m.BackgroundTransparency = bgImage and 1 or t
+            m.BackgroundTransparency = t
             m.BackgroundColor3 = c
         end
     end
@@ -161,7 +167,7 @@ local function spawnRipple(button, relX, relY, color, fillDuration, rippleZIndex
         AnchorPoint = Vector2.new(0.5, 0.5),
         ZIndex = rippleZIndex or ((button.ZIndex or 1) + 1),
         Parent = button,
-    }, { corner(999) })  -- Полностью круглые углы для ripple эффекта
+    }, { corner(9999) })
     tween(circle, TweenInfo.new(fillDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         Size = UDim2.new(0, diameter, 0, diameter),
         BackgroundTransparency = 1,
@@ -355,7 +361,11 @@ function CuteWare:CreateKeySystem(config)
     Overlay:Destroy()
 
     if closedManually and not approved then
-        -- Просто закрываем кей-систему, главное окно НЕ загружается
+        if config.OnClose then
+            config.OnClose()
+        else
+            error("[CuteWare] Key system closed without a valid key.", 0)
+        end
         return false
     end
     return true
@@ -602,7 +612,6 @@ function CuteWare:CreateWindow(config)
     local titleIcon  = resolveImage(config.Icon)
     local bgImage    = resolveImage(config.BackgroundImage)
     local bgTransp   = config.BackgroundImageTransparency or 0.75
-    local useComponentGradient = bgImage and (config.ComponentGradient ~= false)
 
     local TOPBAR_H = 38
     local MIN_SIZE = UDim2.new(0, 200, 0, TOPBAR_H)
@@ -620,6 +629,13 @@ function CuteWare:CreateWindow(config)
     }, { corner(12), stroke(Theme.Stroke, 1) })
     self._mainFrame = Main
 
+    -- FadeCover: a single opaque overlay used ONLY to mask the open/close
+    -- transition. Instead of walking every descendant and toggling its
+    -- transparency (which corrupted internal state like which tab was
+    -- active, open dropdowns, toggle states, etc. and caused the "greyed
+    -- out / broken layout" bug on reopen), we just fade this cover in
+    -- front of everything, hide/show Main underneath it, then fade it
+    -- back out. Nothing inside Main is ever touched.
     local FadeCover = create("Frame", {
         Name = "FadeCover",
         BackgroundColor3 = Theme.Background,
@@ -671,7 +687,7 @@ function CuteWare:CreateWindow(config)
         Size = UDim2.new(1, 0, 0, TOPBAR_H),
         Parent = Main,
     })
-    local topBarMasks = applyPanelCorners(TopBar, 12, { TopLeft = true, TopRight = true, BottomLeft = false, BottomRight = false }, bgImage)
+    local topBarMasks = applyPanelCorners(TopBar, 12, { TopLeft = true, TopRight = true, BottomLeft = false, BottomRight = false })
 
     local titleOffset = 16
     if titleIcon then
@@ -954,7 +970,7 @@ function CuteWare:CreateWindow(config)
         Size = UDim2.new(0, 140, 1, -TOPBAR_H),
         Parent = Main,
     })
-    applyPanelCorners(TabListShell, 12, { TopLeft = false, TopRight = false, BottomLeft = true, BottomRight = false }, bgImage)
+    applyPanelCorners(TabListShell, 12, { TopLeft = false, TopRight = false, BottomLeft = true, BottomRight = false })
 
     local TabList = create("Frame", {
         BackgroundTransparency = 1,
@@ -1106,23 +1122,6 @@ function CuteWare:CreateWindow(config)
                 corner(10), stroke(Theme.Stroke, 1), padding(12),
                 create("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }),
             })
-
-            -- Градиент ТОЛЬКО на фон секции (квадрат под компонентами)
-            if useComponentGradient then
-                local gradient = create("UIGradient", {
-                    Color = ColorSequence.new{
-                        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-                        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255))
-                    },
-                    Transparency = NumberSequence.new{
-                        NumberSequenceKeypoint.new(0, 0.85),
-                        NumberSequenceKeypoint.new(1, 0.95)
-                    },
-                    Rotation = 90
-                })
-                gradient.Parent = SH
-            end
-
             create("TextLabel", {
                 Text = name or "Section", Font = Theme.FontBold, TextSize = 14,
                 TextColor3 = Theme.Text, BackgroundTransparency = 1,
@@ -1132,10 +1131,6 @@ function CuteWare:CreateWindow(config)
 
             local Section = { Holder = SH }
 
-            local function addComponentGradient(comp)
-                -- Градиент только на фон секции, убираем с отдельных компонентов
-            end
-
             function Section:CreateButton(c)
                 c = c or {}
                 local Btn = create("TextButton", {
@@ -1144,7 +1139,6 @@ function CuteWare:CreateWindow(config)
                     BackgroundTransparency = bgImage and 0.5 or 0,
                     Size = UDim2.new(1, 0, 0, 34), Parent = SH,
                 }, { corner(8) })
-                addComponentGradient(Btn)
                 Btn.MouseEnter:Connect(function() quickTween(Btn, { BackgroundColor3 = darken(Theme.Tertiary, 0.75) }, 0.15) end)
                 Btn.MouseLeave:Connect(function() quickTween(Btn, { BackgroundColor3 = Theme.Tertiary }, 0.15) end)
                 Btn.MouseButton1Down:Connect(function() quickTween(Btn, { Size = UDim2.new(1, -6, 0, 32) }, 0.08) end)
@@ -1178,7 +1172,6 @@ function CuteWare:CreateWindow(config)
                     BackgroundTransparency = bgImage and 0.3 or 0,
                     Size = UDim2.new(0, 48, 0, 24), Position = UDim2.new(1, -48, 0.5, -12), Parent = H,
                 }, { corner(6) })
-                addComponentGradient(Sw)
                 local Kn = create("Frame", {
                     BackgroundColor3 = Color3.fromRGB(255, 255, 255),
                     Size = UDim2.new(0, 20, 0, 20),
@@ -1222,7 +1215,6 @@ function CuteWare:CreateWindow(config)
                     BackgroundTransparency = bgImage and 0.4 or 0,
                     Position = UDim2.new(0, 0, 0, 26), Size = UDim2.new(1, 0, 0, 8), Parent = H,
                 }, { corner(4) })
-                addComponentGradient(Bar)
                 local Fill = create("Frame", {
                     BackgroundColor3 = Theme.Accent,
                     Size = UDim2.new((val - mn) / (mx - mn), 0, 1, 0), Parent = Bar,
@@ -1292,7 +1284,6 @@ function CuteWare:CreateWindow(config)
                     BackgroundTransparency = bgImage and 0.4 or 0,
                     Position = UDim2.new(0, 0, 0, 22), Size = UDim2.new(1, 0, 0, 32), Parent = H,
                 }, { corner(8) })
-                addComponentGradient(Box)
                 Box.MouseEnter:Connect(function() if not open then quickTween(Box, { BackgroundColor3 = darken(Theme.Tertiary, 0.75) }, 0.15) end end)
                 Box.MouseLeave:Connect(function() if not open then quickTween(Box, { BackgroundColor3 = Theme.Tertiary }, 0.15) end end)
 
@@ -1546,7 +1537,6 @@ function CuteWare:CreateWindow(config)
                     BackgroundTransparency = bgImage and 0.4 or 0,
                     Position = UDim2.new(0, 0, 0, 22), Size = UDim2.new(1, 0, 0, 30), Parent = H,
                 }, { corner(8) })
-                addComponentGradient(Box)
                 local Input = create("TextBox", {
                     Text = c.CurrentValue or "", PlaceholderText = c.PlaceholderText or "Enter text...",
                     Font = Theme.Font, TextSize = 13, TextColor3 = Theme.Text,
@@ -1580,7 +1570,6 @@ function CuteWare:CreateWindow(config)
                     BackgroundTransparency = bgImage and 0.4 or 0,
                     Size = UDim2.new(0, 70, 0, 26), Position = UDim2.new(1, -70, 0.5, -13), Parent = H,
                 }, { corner(6) })
-                addComponentGradient(KB)
                 KB.MouseButton1Click:Connect(function()
                     listening = true; KB.Text = "..."
                     quickTween(KB, { BackgroundColor3 = Theme.Accent }, 0.12)

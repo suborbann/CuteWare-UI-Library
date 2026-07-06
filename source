@@ -78,12 +78,6 @@ local function lighten(c, amount)
         math.clamp(c.B + (1 - c.B) * amount, 0, 1)
     )
 end
--- Manual bounding-box hit test. Used instead of relying on a Frame's own
--- InputBegan in a couple of spots, because a smaller CHILD frame sitting on
--- top (a slider knob, a color-picker cursor dot) is what Roblox actually
--- delivers the click to — the parent's InputBegan simply never fires for
--- that pixel. Checking the box manually via a global input listener sidesteps
--- that entirely.
 local function pointInside(frame, pos)
     local a, sz = frame.AbsolutePosition, frame.AbsoluteSize
     return pos.X >= a.X and pos.X <= a.X + sz.X and pos.Y >= a.Y and pos.Y <= a.Y + sz.Y
@@ -136,7 +130,6 @@ local function resolveImage(source)
     return "rbxassetid://" .. source
 end
 
--- Material ripple: spawns a growing circle from the click point.
 local function spawnRipple(button, relX, relY, color, fillDuration, rippleZIndex)
     fillDuration = fillDuration or 0.22
     local w = button.AbsoluteSize.X
@@ -647,6 +640,7 @@ function CuteWare:CreateWindow(config)
     local TopBar = create("Frame", {
         Name = "TopBar",
         BackgroundColor3 = darken(Theme.Secondary, 0.92),
+        BackgroundTransparency = bgImage and 0.6 or 0,
         Size = UDim2.new(1, 0, 0, TOPBAR_H),
         Parent = Main,
     })
@@ -684,15 +678,6 @@ function CuteWare:CreateWindow(config)
         })
     end
 
-    -- Drag catcher: a transparent full-size overlay added AFTER the title
-    -- text/icon but BEFORE Controls. In Roblox, InputBegan only fires on the
-    -- exact topmost GuiObject under the cursor — it does NOT bubble up to
-    -- parents. That means clicking directly on the title text or icon (both
-    -- plain, non-listening children of TopBar) previously ate the click and
-    -- TopBar's own InputBegan never fired there, so only the empty gaps of
-    -- the bar were draggable. This catcher sits above the labels (so it wins
-    -- the hit-test everywhere except over Controls) and is what dragging is
-    -- now wired to instead of TopBar itself.
     local DragCatcher = create("Frame", {
         Name = "DragCatcher",
         BackgroundTransparency = 1,
@@ -789,18 +774,26 @@ function CuteWare:CreateWindow(config)
     end)
 
     --------------------------------------------------------------------
-    -- Window:Close() / Window:Open()
-    -- The smooth fade+scale used by the built-in close button, exposed so
-    -- any CUSTOM button you make (Section:CreateButton, CreateCloseButton,
-    -- etc.) can trigger the exact same graceful close instead of just
-    -- setting Main.Visible = false directly (which snaps instantly).
-    --------------------------------------------------------------------
     function Window:Close()
+        local targets = {Main, TopBar, TabListShell}
+        for _, t in ipairs(targets) do
+            if t then
+                quickTween(t, { BackgroundTransparency = 1 }, 0.22)
+            end
+        end
+        for _, d in ipairs(Main:GetDescendants()) do
+            if d:IsA("TextLabel") or d:IsA("TextButton") then
+                quickTween(d, { TextTransparency = 1 }, 0.22)
+            elseif d:IsA("Frame") and d.BackgroundTransparency < 1 then
+                quickTween(d, { BackgroundTransparency = 1 }, 0.22)
+            elseif d:IsA("ImageLabel") then
+                quickTween(d, { ImageTransparency = 1 }, 0.22)
+            end
+        end
         quickTween(Main, {
             Size = UDim2.new(0, windowSize.X.Offset * 0.9, 0, windowSize.Y.Offset * 0.9),
-            BackgroundTransparency = 1,
         }, 0.22)
-        task.wait(0.24)
+        task.wait(0.25)
         Main.Visible = false
     end
 
@@ -808,17 +801,28 @@ function CuteWare:CreateWindow(config)
         Main.Visible = true
         Main.Size = UDim2.new(0, windowSize.X.Offset * 0.9, 0, windowSize.Y.Offset * 0.9)
         Main.BackgroundTransparency = 1
+        for _, d in ipairs(Main:GetDescendants()) do
+            if d:IsA("TextLabel") or d:IsA("TextButton") then d.TextTransparency = 1 end
+            if d:IsA("Frame") and d.BackgroundTransparency < 1 then d.BackgroundTransparency = 1 end
+            if d:IsA("ImageLabel") then d.ImageTransparency = 1 end
+        end
         tween(Main, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
             Size = windowSize, BackgroundTransparency = 0,
         })
+        task.delay(0.1, function()
+            if TopBar then quickTween(TopBar, { BackgroundTransparency = bgImage and 0.6 or 0 }, 0.2) end
+            for _, d in ipairs(Main:GetDescendants()) do
+                if d:IsA("TextLabel") or d:IsA("TextButton") then quickTween(d, { TextTransparency = 0 }, 0.2) end
+                if d:IsA("Frame") and d.BackgroundTransparency == 1 and d ~= TopBar and d ~= TabListShell then quickTween(d, { BackgroundTransparency = 0 }, 0.2) end
+                if d:IsA("ImageLabel") and d ~= BackgroundImage then quickTween(d, { ImageTransparency = 0 }, 0.2) end
+            end
+        end)
     end
 
     CloseBtn.MouseButton1Click:Connect(function()
         task.spawn(function() Window:Close() end)
     end)
 
-    ----------------------------------------------------------------
-    -- MENU TOGGLE KEYBIND (now also fades smoothly instead of snapping)
     ----------------------------------------------------------------
     local toggleKey = config.ToggleKeybind or Enum.KeyCode.RightControl
     local toggling = false
@@ -839,10 +843,6 @@ function CuteWare:CreateWindow(config)
         end
     end)
 
-    ----------------------------------------------------------------
-    -- SMOOTH DRAGGING — now bound to DragCatcher so grabbing ANY point
-    -- of the topbar (including over the title text/icon) works, not just
-    -- the empty background gaps.
     ----------------------------------------------------------------
     do
         local dragging = false
@@ -903,6 +903,7 @@ function CuteWare:CreateWindow(config)
     TabListShell = create("Frame", {
         Name = "TabListShell",
         BackgroundColor3 = Theme.Secondary,
+        BackgroundTransparency = bgImage and 0.65 or 0,
         Position = UDim2.new(0, 0, 0, TOPBAR_H),
         Size = UDim2.new(0, 140, 1, -TOPBAR_H),
         Parent = Main,
@@ -935,7 +936,7 @@ function CuteWare:CreateWindow(config)
             Text = c.Name or "Action", Font = Theme.Font, TextSize = 13,
             TextColor3 = Theme.SubText,
             BackgroundColor3 = darken(Theme.Secondary, 0.8),
-            BackgroundTransparency = 0,
+            BackgroundTransparency = bgImage and 0.7 or 0,
             Size = UDim2.new(1, 0, 0, 30),
             AnchorPoint = Vector2.new(0, 1),
             Position = UDim2.new(0, 0, 1, 0),
@@ -949,8 +950,6 @@ function CuteWare:CreateWindow(config)
         return Btn
     end
 
-    ----------------------------------------------------------------
-    -- Window:CreateTab(config)
     ----------------------------------------------------------------
     function Window:CreateTab(tabConfig)
         tabConfig = tabConfig or {}
@@ -1050,12 +1049,10 @@ function CuteWare:CreateWindow(config)
         table.insert(Window.Tabs, Tab)
         if #Window.Tabs == 1 then selectTab() end
 
-        ------------------------------------------------------------
-        -- Tab:CreateSection(name)
-        ------------------------------------------------------------
         function Tab:CreateSection(name)
             local SH = create("Frame", {
                 BackgroundColor3 = Theme.Secondary,
+                BackgroundTransparency = bgImage and 0.6 or 0,
                 Size = UDim2.new(1, 0, 0, 0),
                 AutomaticSize = Enum.AutomaticSize.Y,
                 Parent = Page,
@@ -1077,6 +1074,7 @@ function CuteWare:CreateWindow(config)
                 local Btn = create("TextButton", {
                     Text = c.Name or "Button", Font = Theme.Font, TextSize = 13,
                     TextColor3 = Theme.Text, BackgroundColor3 = Theme.Tertiary,
+                    BackgroundTransparency = bgImage and 0.5 or 0,
                     Size = UDim2.new(1, 0, 0, 34), Parent = SH,
                 }, { corner(8) })
                 Btn.MouseEnter:Connect(function() quickTween(Btn, { BackgroundColor3 = darken(Theme.Tertiary, 0.75) }, 0.15) end)
@@ -1087,10 +1085,6 @@ function CuteWare:CreateWindow(config)
                 return Btn
             end
 
-            -- Section:CreateCloseButton — a ready-made button that closes
-            -- the whole window via Window:Close() (smooth fade), so any
-            -- "custom close button" you add actually behaves correctly
-            -- instead of snapping the GUI away instantly.
             function Section:CreateCloseButton(c)
                 c = c or {}
                 return Section:CreateButton({
@@ -1113,6 +1107,7 @@ function CuteWare:CreateWindow(config)
                 })
                 local Sw = create("Frame", {
                     BackgroundColor3 = state and Theme.Accent or Theme.Tertiary,
+                    BackgroundTransparency = bgImage and 0.3 or 0,
                     Size = UDim2.new(0, 48, 0, 24), Position = UDim2.new(1, -48, 0.5, -12), Parent = H,
                 }, { corner(6) })
                 local Kn = create("Frame", {
@@ -1135,16 +1130,6 @@ function CuteWare:CreateWindow(config)
                 return tog
             end
 
-            ----------------------------------------------------------
-            -- Section:CreateSlider(config)
-            -- FIX: dragging previously connected InputBegan on `Bar`, but
-            -- the Fill/Knob frames sit ON TOP of Bar as children — Roblox
-            -- delivers the click to whichever GuiObject is topmost at that
-            -- pixel, so clicking anywhere on the already-filled portion (or
-            -- the knob) landed on Fill/Knob instead of Bar, and nothing
-            -- happened. A dedicated, taller, always-topmost HitArea now
-            -- owns all the input handling instead.
-            ----------------------------------------------------------
             function Section:CreateSlider(c)
                 c = c or {}
                 local mn  = c.Range and c.Range[1] or 0
@@ -1165,6 +1150,7 @@ function CuteWare:CreateWindow(config)
                 })
                 local Bar = create("Frame", {
                     BackgroundColor3 = Theme.Tertiary,
+                    BackgroundTransparency = bgImage and 0.4 or 0,
                     Position = UDim2.new(0, 0, 0, 26), Size = UDim2.new(1, 0, 0, 8), Parent = H,
                 }, { corner(4) })
                 local Fill = create("Frame", {
@@ -1179,7 +1165,6 @@ function CuteWare:CreateWindow(config)
                     Parent = Bar,
                 }, { corner(7) })
 
-                -- topmost, taller hit zone — the actual input target
                 local HitArea = create("Frame", {
                     BackgroundTransparency = 1,
                     Position = UDim2.new(0, 0, 0, 20),
@@ -1214,10 +1199,6 @@ function CuteWare:CreateWindow(config)
                 return H
             end
 
-            ----------------------------------------------------------
-            -- Section:CreateDropdown(config)
-            -- Arrow glyph changed to "˅" per request.
-            ----------------------------------------------------------
             function Section:CreateDropdown(c)
                 c = c or {}
                 local opts = c.Options or {}
@@ -1238,6 +1219,7 @@ function CuteWare:CreateWindow(config)
                 })
                 local Box = create("TextButton", {
                     Text = "", BackgroundColor3 = Theme.Tertiary,
+                    BackgroundTransparency = bgImage and 0.4 or 0,
                     Position = UDim2.new(0, 0, 0, 22), Size = UDim2.new(1, 0, 0, 32), Parent = H,
                 }, { corner(8) })
                 Box.MouseEnter:Connect(function() if not open then quickTween(Box, { BackgroundColor3 = darken(Theme.Tertiary, 0.75) }, 0.15) end end)
@@ -1259,6 +1241,7 @@ function CuteWare:CreateWindow(config)
                 local optH = #opts * 30
                 local OptionList = create("Frame", {
                     BackgroundColor3 = Theme.Tertiary,
+                    BackgroundTransparency = bgImage and 0.4 or 0,
                     Size = UDim2.new(1, -24, 0, 0),
                     Position = UDim2.new(0, 0, 0, 0),
                     ZIndex = 20, ClipsDescendants = true, Visible = false,
@@ -1356,17 +1339,6 @@ function CuteWare:CreateWindow(config)
                 })
             end
 
-            ----------------------------------------------------------
-            -- Section:CreateColorPicker(config)
-            -- FIX: SVCur/HueCur (the little cursor dots) sit on top of
-            -- SVBox/HueBar as children, so — same root cause as the slider
-            -- bug — clicking near the current selection hit the cursor dot
-            -- instead of the box/bar underneath, and SVBox.InputBegan /
-            -- HueBar.InputBegan simply never fired there. Dragging now goes
-            -- through a single global UserInputService.InputBegan with a
-            -- manual bounding-box check (pointInside) instead, and also
-            -- applies the color immediately on click (not just on drag).
-            ----------------------------------------------------------
             function Section:CreateColorPicker(c)
                 c = c or {}
                 local col  = c.CurrentColor or Color3.fromRGB(255, 255, 255)
@@ -1387,6 +1359,7 @@ function CuteWare:CreateWindow(config)
                 })
                 local Preview = create("TextButton", {
                     Text = "", BackgroundColor3 = col,
+                    BackgroundTransparency = bgImage and 0.3 or 0,
                     Size = UDim2.new(0, 28, 0, 20), Position = UDim2.new(1, -28, 0.5, -10), Parent = Header,
                 }, { corner(6), stroke(Theme.Stroke, 1) })
 
@@ -1421,6 +1394,7 @@ function CuteWare:CreateWindow(config)
                 local SVBox = create("ImageLabel", {
                     Image = "rbxassetid://4155801252",
                     BackgroundColor3 = Color3.fromHSV(h, 1, 1),
+                    BackgroundTransparency = bgImage and 0.2 or 0,
                     Size = UDim2.new(1, 0, 0, 146),
                     Position = UDim2.new(0, 0, 0, 32), Parent = Body,
                 }, { corner(8) })
@@ -1498,6 +1472,7 @@ function CuteWare:CreateWindow(config)
                 })
                 local Box = create("Frame", {
                     BackgroundColor3 = Theme.Tertiary,
+                    BackgroundTransparency = bgImage and 0.4 or 0,
                     Position = UDim2.new(0, 0, 0, 22), Size = UDim2.new(1, 0, 0, 30), Parent = H,
                 }, { corner(8) })
                 local Input = create("TextBox", {
@@ -1530,6 +1505,7 @@ function CuteWare:CreateWindow(config)
                 local KB = create("TextButton", {
                     Text = curKey.Name, Font = Theme.Font, TextSize = 12,
                     TextColor3 = Theme.Text, BackgroundColor3 = Theme.Tertiary,
+                    BackgroundTransparency = bgImage and 0.4 or 0,
                     Size = UDim2.new(0, 70, 0, 26), Position = UDim2.new(1, -70, 0.5, -13), Parent = H,
                 }, { corner(6) })
                 KB.MouseButton1Click:Connect(function()
@@ -1560,12 +1536,12 @@ function CuteWare:CreateWindow(config)
             end
 
             return Section
-        end -- CreateSection
+        end
 
         return Tab
-    end -- CreateTab
+    end
 
     return Window
-end -- CreateWindow
+end
 
 return CuteWare

@@ -8,27 +8,29 @@
 ░╚════╝░░╚═════╝░░░░╚═╝░░░╚══════╝░░░░░░░░░╚═╝░░░╚═╝░░╚═╝░░╚═╝╚═╝░░╚═╝╚══════╝
                                            https://dsc.gg/cuteware
 
-  == PATCHED VERSION 2 ==
-  Older fixes (kept):
-   1) Toggle-key hide/show (RCtrl) breaking the window layout.
-   2) Corner "mask" squares not respecting parent transparency.
-   3) Minimize -> hide -> show sequence corrupting window state.
+  Older fixes :
 
-  This round:
-   4) Background-image gradient overlay setting (Window:SetGradientOverlay,
-      config.GradientOverlay/GradientTransparency/GradientAngle). Fixed a
-      crash: the previous attempt called a `MoveAbove` method that doesn't
-      exist on Roblox Instances, which errored out CreateWindow the instant
-      a BackgroundImage was set (this is why the last version didn't work
-      at all). Replaced with plain ZIndex ordering (image = 0, gradient = 1)
-      so no reordering call is needed.
-   5) Corner masks (MaskTL/TR/BL/BR) are skipped entirely on TopBar/
+   1) White transparent gradient wash on Section boxes (the rounded panels
+      that buttons/toggles/sliders/etc actually sit inside), not on the
+      buttons themselves. Auto-enables the moment a background image is
+      set; force with config.ComponentGradient = true/false. (An earlier
+      attempt built this as a separate window-wide overlay layer using a
+      `MoveAbove` call that doesn't exist on Roblox Instances - that
+      crashed CreateWindow the instant a BackgroundImage was set, which is
+      why that version didn't work at all. Replaced with the simpler,
+      correctly-scoped version below.)
+   2) Corner masks (MaskTL/TR/BL/BR) are skipped entirely on TopBar/
       TabListShell when a background image is active.
-   6) Tab buttons are slightly more transparent when a background image is
+   3) Tab buttons are slightly more transparent when a background image is
       active.
-   7) Tab ripple click-effect is a true circle (huge corner radius) and is
-      clipped by its own corner masks, so no square corners poke out.
-   8) CuteWare:SetAccentColor / config.AccentColor lets you swap out the
+   4) Tab ripple click-effect is a true circle (huge corner radius). (An
+      earlier attempt also added corner masks to the tab button itself to
+      hide the ripple's corner overflow - that squared off the button's own
+      rounded corners the moment it became active/opaque. Removed; the
+      round ripple alone is a big improvement and the tiny corner sliver it
+      can peek into for a split second is far less noticeable than a
+      permanently square "selected" tab.)
+   5) CuteWare:SetAccentColor / config.AccentColor lets you swap out the
       default pink accent globally.
 --]]
 
@@ -652,16 +654,12 @@ function CuteWare:CreateWindow(config)
     local titleIcon  = resolveImage(config.Icon)
     local bgImage    = resolveImage(config.BackgroundImage)
     local bgTransp   = config.BackgroundImageTransparency or 0.75
+    -- White transparent gradient wash on the background that UI components
+    -- sit on - i.e. each Section box (the rounded panel that holds buttons/
+    -- toggles/sliders/etc), not the buttons themselves. Auto-enables the
+    -- moment a background image is set; can be forced with
+    -- config.ComponentGradient = true/false.
     local useComponentGradient = bgImage and (config.ComponentGradient ~= false)
-
-    -- GRADIENT OVERLAY SETTINGS: a white translucent wash placed above the
-    -- background image (but below the UI panels), so text/components stay
-    -- readable. Only kicks in automatically once a background image exists,
-    -- but can be forced on/off via config.GradientOverlay.
-    local gradientEnabled = config.GradientOverlay
-    if gradientEnabled == nil then gradientEnabled = bgImage ~= nil end
-    local gradientTransparency = config.GradientTransparency or 0.82
-    local gradientAngle        = config.GradientAngle or 90
 
     local TOPBAR_H = 38
     local MIN_SIZE = UDim2.new(0, 200, 0, TOPBAR_H)
@@ -707,57 +705,6 @@ function CuteWare:CreateWindow(config)
         }, { corner(12) })
     end
 
-    -- White gradient wash. Sits above the background image and below all
-    -- interactive UI. Toggled by gradientEnabled, and lives independently of
-    -- BackgroundImage so it can be created/removed later via
-    -- Window:SetGradientOverlay.
-    --
-    -- NOTE: an earlier version tried to guarantee draw order with
-    -- `GradientOverlay:MoveAbove(BackgroundImage)`. That method doesn't
-    -- exist on Roblox Instances, so it threw an error the instant a
-    -- BackgroundImage was present, which aborted the rest of CreateWindow
-    -- (no TopBar, no tabs, nothing after it got built). Fixed by simply
-    -- giving the two frames different ZIndex values: BackgroundImage stays
-    -- at 0, GradientOverlay sits at 1, so it always draws above the image
-    -- no matter which one was created first - no reordering call needed.
-    local GradientOverlay
-    local function buildGradientOverlay()
-        GradientOverlay = create("Frame", {
-            Name = "GradientOverlay",
-            BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-            BackgroundTransparency = gradientTransparency,
-            Size = UDim2.new(1, 0, 1, 0),
-            ZIndex = 1,
-            Parent = Main,
-        }, { corner(12) })
-        create("UIGradient", {
-            Transparency = NumberSequence.new({
-                NumberSequenceKeypoint.new(0, 0),
-                NumberSequenceKeypoint.new(1, 0.5),
-            }),
-            Rotation = gradientAngle,
-        }).Parent = GradientOverlay
-    end
-    if gradientEnabled and bgImage then
-        buildGradientOverlay()
-    end
-
-    function Window:SetGradientOverlay(enabled, transparency, angle)
-        gradientEnabled = enabled
-        if transparency then gradientTransparency = transparency end
-        if angle then gradientAngle = angle end
-        if enabled then
-            if GradientOverlay then
-                GradientOverlay.BackgroundTransparency = gradientTransparency
-                GradientOverlay.Visible = true
-            else
-                buildGradientOverlay()
-            end
-        elseif GradientOverlay then
-            GradientOverlay.Visible = false
-        end
-    end
-
     function Window:SetBackgroundImage(imageSource, transparency)
         local resolved = resolveImage(imageSource)
         if not resolved then return end
@@ -771,11 +718,6 @@ function CuteWare:CreateWindow(config)
         BackgroundImage.Image = resolved
         BackgroundImage.ImageTransparency = transparency or bgTransp
         bgImage = resolved
-        if gradientEnabled and not GradientOverlay then
-            buildGradientOverlay()
-        end
-        -- No reordering needed here either: BackgroundImage is ZIndex 0 and
-        -- GradientOverlay (if it exists) is ZIndex 1, so it's already on top.
     end
 
     Main.Size = UDim2.new(0, size.X.Offset * 0.4, 0, size.Y.Offset * 0.4)
@@ -1140,14 +1082,7 @@ function CuteWare:CreateWindow(config)
             ClipsDescendants = true,
             ZIndex = 2,
             Parent = TabList,
-        })
-        -- Corner masks here specifically fix the ripple click-effect: Roblox's
-        -- ClipsDescendants clips to the rectangular bounds only (it ignores
-        -- UICorner), so the round ripple can still poke sharp corners past
-        -- the rounded silhouette. These masks track TabBtn's own
-        -- color/transparency live, so they stay invisible while the tab is
-        -- inactive and only mask the corners once it lights up.
-        applyPanelCorners(TabBtn, 8, {})
+        }, { corner(8) })
 
         local TabLabel = create("TextLabel", {
             Text = tabName, Font = Theme.Font, TextSize = 14,
@@ -1270,23 +1205,6 @@ function CuteWare:CreateWindow(config)
 
             local Section = { Holder = SH }
 
-            local function addComponentGradient(comp)
-                if useComponentGradient and comp.BackgroundColor3 then
-                    local gradient = create("UIGradient", {
-                        Color = ColorSequence.new{
-                            ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-                            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255))
-                        },
-                        Transparency = NumberSequence.new{
-                            NumberSequenceKeypoint.new(0, 0.7),
-                            NumberSequenceKeypoint.new(1, 0.85)
-                        },
-                        Rotation = 90
-                    })
-                    gradient.Parent = comp
-                end
-            end
-
             function Section:CreateButton(c)
                 c = c or {}
                 local Btn = create("TextButton", {
@@ -1295,7 +1213,6 @@ function CuteWare:CreateWindow(config)
                     BackgroundTransparency = bgImage and 0.5 or 0,
                     Size = UDim2.new(1, 0, 0, 34), Parent = SH,
                 }, { corner(8) })
-                addComponentGradient(Btn)
                 Btn.MouseEnter:Connect(function() quickTween(Btn, { BackgroundColor3 = darken(Theme.Tertiary, 0.75) }, 0.15) end)
                 Btn.MouseLeave:Connect(function() quickTween(Btn, { BackgroundColor3 = Theme.Tertiary }, 0.15) end)
                 Btn.MouseButton1Down:Connect(function() quickTween(Btn, { Size = UDim2.new(1, -6, 0, 32) }, 0.08) end)
@@ -1329,7 +1246,6 @@ function CuteWare:CreateWindow(config)
                     BackgroundTransparency = bgImage and 0.3 or 0,
                     Size = UDim2.new(0, 48, 0, 24), Position = UDim2.new(1, -48, 0.5, -12), Parent = H,
                 }, { corner(6) })
-                addComponentGradient(Sw)
                 local Kn = create("Frame", {
                     BackgroundColor3 = Color3.fromRGB(255, 255, 255),
                     Size = UDim2.new(0, 20, 0, 20),
@@ -1373,7 +1289,6 @@ function CuteWare:CreateWindow(config)
                     BackgroundTransparency = bgImage and 0.4 or 0,
                     Position = UDim2.new(0, 0, 0, 26), Size = UDim2.new(1, 0, 0, 8), Parent = H,
                 }, { corner(4) })
-                addComponentGradient(Bar)
                 local Fill = create("Frame", {
                     BackgroundColor3 = Theme.Accent,
                     Size = UDim2.new((val - mn) / (mx - mn), 0, 1, 0), Parent = Bar,
@@ -1443,7 +1358,6 @@ function CuteWare:CreateWindow(config)
                     BackgroundTransparency = bgImage and 0.4 or 0,
                     Position = UDim2.new(0, 0, 0, 22), Size = UDim2.new(1, 0, 0, 32), Parent = H,
                 }, { corner(8) })
-                addComponentGradient(Box)
                 Box.MouseEnter:Connect(function() if not open then quickTween(Box, { BackgroundColor3 = darken(Theme.Tertiary, 0.75) }, 0.15) end end)
                 Box.MouseLeave:Connect(function() if not open then quickTween(Box, { BackgroundColor3 = Theme.Tertiary }, 0.15) end end)
 
@@ -1697,7 +1611,6 @@ function CuteWare:CreateWindow(config)
                     BackgroundTransparency = bgImage and 0.4 or 0,
                     Position = UDim2.new(0, 0, 0, 22), Size = UDim2.new(1, 0, 0, 30), Parent = H,
                 }, { corner(8) })
-                addComponentGradient(Box)
                 local Input = create("TextBox", {
                     Text = c.CurrentValue or "", PlaceholderText = c.PlaceholderText or "Enter text...",
                     Font = Theme.Font, TextSize = 13, TextColor3 = Theme.Text,
@@ -1731,7 +1644,6 @@ function CuteWare:CreateWindow(config)
                     BackgroundTransparency = bgImage and 0.4 or 0,
                     Size = UDim2.new(0, 70, 0, 26), Position = UDim2.new(1, -70, 0.5, -13), Parent = H,
                 }, { corner(6) })
-                addComponentGradient(KB)
                 KB.MouseButton1Click:Connect(function()
                     listening = true; KB.Text = "..."
                     quickTween(KB, { BackgroundColor3 = Theme.Accent }, 0.12)

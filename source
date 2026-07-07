@@ -7,31 +7,6 @@
 ╚█████╔╝╚██████╔╝░░░██║░░░███████╗░░░░░░░░╚██╔╝░╚██╔╝░██║░░██║██║░░██║███████╗
 ░╚════╝░░╚═════╝░░░░╚═╝░░░╚══════╝░░░░░░░░░╚═╝░░░╚═╝░░╚═╝░░╚═╝╚═╝░░╚═╝╚══════╝
                                            https://dsc.gg/cuteware
-
-  Older fixes :
-
-   1) White transparent gradient wash on Section boxes (the rounded panels
-      that buttons/toggles/sliders/etc actually sit inside), not on the
-      buttons themselves. Auto-enables the moment a background image is
-      set; force with config.ComponentGradient = true/false. (An earlier
-      attempt built this as a separate window-wide overlay layer using a
-      `MoveAbove` call that doesn't exist on Roblox Instances - that
-      crashed CreateWindow the instant a BackgroundImage was set, which is
-      why that version didn't work at all. Replaced with the simpler,
-      correctly-scoped version below.)
-   2) Corner masks (MaskTL/TR/BL/BR) are skipped entirely on TopBar/
-      TabListShell when a background image is active.
-   3) Tab buttons are slightly more transparent when a background image is
-      active.
-   4) Tab ripple click-effect is a true circle (huge corner radius). (An
-      earlier attempt also added corner masks to the tab button itself to
-      hide the ripple's corner overflow - that squared off the button's own
-      rounded corners the moment it became active/opaque. Removed; the
-      round ripple alone is a big improvement and the tiny corner sliver it
-      can peek into for a split second is far less noticeable than a
-      permanently square "selected" tab.)
-   5) CuteWare:SetAccentColor / config.AccentColor lets you swap out the
-      default pink accent globally.
 --]]
 
 local TweenService     = game:GetService("TweenService")
@@ -109,11 +84,11 @@ local function pointInside(frame, pos)
     return pos.X >= a.X and pos.X <= a.X + sz.X and pos.Y >= a.Y and pos.Y <= a.Y + sz.Y
 end
 
--- PATCH #2: masks now sync their transparency (and color) live with the
--- panel they belong to, instead of being frozen at creation time.
--- `skipMasks`, when true, only applies the UICorner and skips creating the
--- corner-mask frames entirely (used when a background image is active, so
--- the image isn't chopped up by square mask patches).
+-- masks sync their transparency (and color) live with the panel they
+-- belong to, instead of being frozen at creation time. `skipMasks`, when
+-- true, only applies the UICorner and skips creating the corner-mask
+-- frames entirely (used when a background image is active, so the image
+-- isn't chopped up by square mask patches).
 local function applyPanelCorners(panel, radius, keep, skipMasks)
     corner(radius).Parent = panel
     if skipMasks then return {} end
@@ -178,7 +153,11 @@ local function resolveImage(source)
     return "rbxassetid://" .. source
 end
 
-local function spawnRipple(button, relX, relY, color, fillDuration, rippleZIndex)
+-- spawnRipple now takes an optional `parentOverride` - if given, the
+-- growing ripple circle is parented there instead of `button` directly.
+-- Used so the ripple can be clipped inside a dedicated rounded layer
+-- rather than the tab button itself.
+local function spawnRipple(button, relX, relY, color, fillDuration, rippleZIndex, parentOverride)
     fillDuration = fillDuration or 0.22
     local w = button.AbsoluteSize.X
     local h = button.AbsoluteSize.Y
@@ -190,7 +169,7 @@ local function spawnRipple(button, relX, relY, color, fillDuration, rippleZIndex
         Position = UDim2.new(0, relX, 0, relY),
         AnchorPoint = Vector2.new(0.5, 0.5),
         ZIndex = rippleZIndex or ((button.ZIndex or 1) + 1),
-        Parent = button,
+        Parent = parentOverride or button,
     }, { corner(9999) })
     tween(circle, TweenInfo.new(fillDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         Size = UDim2.new(0, diameter, 0, diameter),
@@ -211,6 +190,19 @@ local KeybindMap = {
     K      = Enum.KeyCode.K,
     M      = Enum.KeyCode.M,
 }
+
+-- A harmless proxy object: every method call on it just returns itself,
+-- so any chain like Window:CreateTab(...):CreateSection(...):CreateButton(...)
+-- works without erroring, but nothing is ever actually created or shown.
+local function makeNoOpProxy()
+    local proxy = {}
+    setmetatable(proxy, {
+        __index = function(_, _)
+            return function(...) return proxy end
+        end,
+    })
+    return proxy
+end
 
 --------------------------------------------------------------------
 -- LIBRARY ROOT
@@ -256,6 +248,9 @@ function CuteWare:Init()
     }, { create("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 10), VerticalAlignment = Enum.VerticalAlignment.Bottom, HorizontalAlignment = Enum.HorizontalAlignment.Right }) })
 
     self._mainFrame = nil
+
+    -- reset per-session key-system state
+    self._keySystemFailed = false
 
     pcall(function()
         local s = Instance.new("Sound")
@@ -394,11 +389,16 @@ function CuteWare:CreateKeySystem(config)
     Overlay:Destroy()
 
     if closedManually and not approved then
+        -- FIX #1: remember that the key system was closed without a valid
+        -- key, regardless of whether OnClose is provided. CreateWindow
+        -- checks this flag on its very first line and refuses to build a
+        -- real window if it's set - so even if the caller's script keeps
+        -- running and calls CreateWindow anyway, the main window will
+        -- never actually appear.
+        self._keySystemFailed = true
+
         if config.OnClose then
             config.OnClose()
-        else
-            -- Скрипт не открывается при закрытии кей-системы крестиком
-            return false
         end
         return false
     end
@@ -641,6 +641,15 @@ end
 function CuteWare:CreateWindow(config)
     config = config or {}
 
+    -- FIX #1: if the key system was closed with the X and no valid key was
+    -- entered, refuse to build a real window - return a no-op stub so the
+    -- caller's script can keep calling Window:CreateTab()/etc without
+    -- erroring, but nothing ever gets created or shown.
+    if self._keySystemFailed then
+        warn("[CuteWare] Key system was closed without a valid key - window not created.")
+        return makeNoOpProxy()
+    end
+
     -- ACCENT COLOR OVERRIDE: lets the caller swap out the default pink
     -- accent for anything else. Applies globally (affects every widget
     -- created from here on), matching how Theme is already shared.
@@ -654,12 +663,12 @@ function CuteWare:CreateWindow(config)
     local titleIcon  = resolveImage(config.Icon)
     local bgImage    = resolveImage(config.BackgroundImage)
     local bgTransp   = config.BackgroundImageTransparency or 0.75
-    -- White transparent gradient wash on the background that UI components
-    -- sit on - i.e. each Section box (the rounded panel that holds buttons/
-    -- toggles/sliders/etc), not the buttons themselves. Auto-enables the
-    -- moment a background image is set; can be forced with
-    -- config.ComponentGradient = true/false.
-    local useComponentGradient = bgImage and (config.ComponentGradient ~= false)
+    -- FIX #3: white/transparent gradient wash on the background that UI
+    -- components sit on - i.e. each Section box (the rounded panel that
+    -- holds buttons/toggles/sliders/etc), not the buttons themselves. Now
+    -- on by default always (previously only auto-enabled with a
+    -- background image). Force off with config.ComponentGradient = false.
+    local useComponentGradient = config.ComponentGradient ~= false
 
     local TOPBAR_H = 38
     local MIN_SIZE = UDim2.new(0, 200, 0, TOPBAR_H)
@@ -680,10 +689,9 @@ function CuteWare:CreateWindow(config)
     -- FadeCover: a single opaque overlay used ONLY to mask the open/close
     -- transition. Instead of walking every descendant and toggling its
     -- transparency (which corrupted internal state like which tab was
-    -- active, open dropdowns, toggle states, etc. and caused the "greyed
-    -- out / broken layout" bug on reopen), we just fade this cover in
-    -- front of everything, hide/show Main underneath it, then fade it
-    -- back out. Nothing inside Main is ever touched.
+    -- active, open dropdowns, toggle states, etc.), we just fade this
+    -- cover in front of everything, hide/show Main underneath it, then
+    -- fade it back out. Nothing inside Main is ever touched.
     local FadeCover = create("Frame", {
         Name = "FadeCover",
         BackgroundColor3 = Theme.Background,
@@ -1084,6 +1092,21 @@ function CuteWare:CreateWindow(config)
             Parent = TabList,
         }, { corner(8) })
 
+        -- FIX #2: dedicated rounded, clipped layer for the click-ripple so
+        -- it's contained inside the tab's own rounded shape as closely as
+        -- Roblox allows (ClipsDescendants clips to the rectangular bounds
+        -- regardless of UICorner, but this keeps the ripple visually tied
+        -- to the tab's corner radius instead of floating loose on top of
+        -- the raw button).
+        local RippleLayer = create("Frame", {
+            Name = "RippleLayer",
+            BackgroundTransparency = 1,
+            ClipsDescendants = true,
+            Size = UDim2.new(1, 0, 1, 0),
+            ZIndex = 3,
+            Parent = TabBtn,
+        }, { corner(8) })
+
         local TabLabel = create("TextLabel", {
             Text = tabName, Font = Theme.Font, TextSize = 14,
             TextColor3 = Theme.SubText, BackgroundTransparency = 1,
@@ -1148,7 +1171,7 @@ function CuteWare:CreateWindow(config)
 
             local rx = clickX or TabBtn.AbsoluteSize.X / 2
             local ry = clickY or TabBtn.AbsoluteSize.Y / 2
-            spawnRipple(TabBtn, rx, ry, lighten(Theme.Accent, 0.1), 0.28, 3)
+            spawnRipple(TabBtn, rx, ry, lighten(Theme.Accent, 0.1), 0.28, 3, RippleLayer)
         end
 
         TabBtn.MouseButton1Click:Connect(function()
@@ -1180,7 +1203,8 @@ function CuteWare:CreateWindow(config)
                 create("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }),
             })
 
-            -- Добавляем градиент для компонентов при наличии bgImage
+            -- FIX #3: white/transparent gradient wash behind the section's
+            -- contents, now on by default (see useComponentGradient above).
             if useComponentGradient then
                 local gradient = create("UIGradient", {
                     Color = ColorSequence.new{

@@ -11,26 +11,28 @@ A Rayfield/Orion-style UI library for Roblox: windows, tabs, sections, and a ful
 1. [Installation](#installation)
 2. [CuteWare:Init()](#cutewareinit)
 3. [CuteWare:CreateKeySystem()](#cutewarecreatekeysystem)
-4. [CuteWare:CreateWindow()](#cutewarecreatewindow)
-5. [Window Methods](#window-methods)
-6. [Window:CreateTab()](#windowcreatetab)
-7. [Tab:CreateSection()](#tabcreatesection)
-8. [Section Elements](#section-elements)
-   - [CreateButton](#sectioncreatebutton)
-   - [CreateCloseButton](#sectioncreateclosebutton)
-   - [CreateToggle](#sectioncreatetoggle)
-   - [CreateSlider](#sectioncreateslider)
-   - [CreateDropdown](#sectioncreatedropdown)
-   - [CreateMenuKeybindDropdown](#sectioncreatemenukeybinddropdown)
-   - [CreateColorPicker](#sectioncreatecolorpicker)
-   - [CreateTextbox](#sectioncreatetextbox)
-   - [CreateKeybind](#sectioncreatekeybind)
-   - [CreateLabel](#sectioncreatelabel)
-9. [Notifications](#notifications)
-   - [CuteWare:Notify()](#cutewarenotify)
-   - [CuteWare:NotifyBig()](#cutewarenotifybig)
-10. [CuteWare.Flags](#cutewareflags)
-11. [Full Example](#full-example)
+4. [CuteWare:SetAccentColor()](#cutewaresetaccentcolor)
+5. [CuteWare:Refresh()](#cutewarerefresh)
+6. [CuteWare:CreateWindow()](#cutewarecreatewindow)
+7. [Window Methods](#window-methods)
+8. [Window:CreateTab()](#windowcreatetab)
+9. [Tab:CreateSection()](#tabcreatesection)
+10. [Section Elements](#section-elements)
+    - [CreateButton](#sectioncreatebutton)
+    - [CreateCloseButton](#sectioncreateclosebutton)
+    - [CreateToggle](#sectioncreatetoggle)
+    - [CreateSlider](#sectioncreateslider)
+    - [CreateDropdown](#sectioncreatedropdown)
+    - [CreateMenuKeybindDropdown](#sectioncreatemenukeybinddropdown)
+    - [CreateColorPicker](#sectioncreatecolorpicker)
+    - [CreateTextbox](#sectioncreatetextbox)
+    - [CreateKeybind](#sectioncreatekeybind)
+    - [CreateLabel](#sectioncreatelabel)
+11. [Notifications](#notifications)
+    - [CuteWare:Notify()](#cutewarenotify)
+    - [CuteWare:NotifyBig()](#cutewarenotifybig)
+12. [CuteWare.Flags](#cutewareflags)
+13. [Full Example](#full-example)
 
 ---
 
@@ -41,7 +43,7 @@ local CuteWare = loadstring(game:HttpGet("https://raw.githubusercontent.com/subo
 CuteWare:Init()
 ```
 
-`Init()` must be called once, before anything else. It destroys any previous CuteWare instance (safe for re-executing), sets up notification holders, and plays a short startup sound. Takes no parameters.
+`Init()` must be called once, before anything else. It destroys any previous CuteWare instance (safe for re-executing), sets up notification holders, resets the refresh registry, and plays a short startup sound. Takes no parameters.
 
 ---
 
@@ -85,6 +87,41 @@ Returns `true` if the key was accepted, `false` if closed manually (and `OnClose
 
 ---
 
+## CuteWare:SetAccentColor()
+
+Changes the global accent color used by the library going forward.
+
+```lua
+CuteWare:SetAccentColor(Color3.fromRGB(120, 180, 255))                                   -- dark/hover shade derived automatically
+CuteWare:SetAccentColor(Color3.fromRGB(120, 180, 255), Color3.fromRGB(90, 140, 210))     -- explicit dark/hover shade
+```
+
+| Field / Arg | Type   | Required? | Default | Notes |
+|-------------|--------|-----------|---------|-------|
+| `color`     | Color3 | required  | —       | New accent color. |
+| `darkColor` | Color3 | optional  | derived automatically (darkened) | Hover/press shade. |
+
+By itself, this only affects **newly created** elements from that point on. To re-color everything that's already on screen, call `CuteWare:Refresh()` (or `Window:Refresh()`) right after.
+
+---
+
+## CuteWare:Refresh()
+
+Re-applies the current theme colors (accent, background, text, sub-text, and every panel/component color) to **every element that already exists**, without rebuilding anything and without losing any state — the open tab, toggle values, slider positions, dropdown selections, textbox contents, scroll position, minimized/maximized state, and window position/size are all untouched.
+
+```lua
+CuteWare:SetAccentColor(Color3.fromRGB(120, 180, 255))
+CuteWare:Refresh()
+```
+
+Use this any time you change `CuteWare:SetAccentColor(...)` (or otherwise edit the theme) after the window is already open — for example, an in-menu "theme" or "accent color" picker that instantly re-skins the UI live in front of the player, instead of only affecting elements created afterward.
+
+Takes no parameters and returns nothing. Safe to call as often as you like — elements that no longer exist (e.g. a closed key-system prompt, a dismissed toast) are automatically skipped and cleaned up.
+
+`Window:Refresh()` (see [Window Methods](#window-methods)) is an identical alias, if you prefer calling it off your window reference instead of the library root.
+
+---
+
 ## CuteWare:CreateWindow()
 
 ```lua
@@ -122,12 +159,14 @@ The window plays a "pop in" spawn animation (grows from small, centered on scree
 ```lua
 Window:Close()                          -- smooth fade + shrink, then hides the window
 Window:Open()                           -- smooth grow + fade-in, shows the window again
+Window:Refresh()                        -- re-applies the current theme colors to every existing element (alias for CuteWare:Refresh())
 Window:SetBackgroundImage(source, transparency)  -- change the background image at runtime
 Window:AddTabButton({ Name = "...", Callback = function() end })  -- optional, pinned button under the tab list
 Window:CreateTab({ Name = "..." })      -- see below
 ```
 
 - `Window:Close()` / `Window:Open()` are what the built-in × button and the menu toggle keybind use internally. Wire your **own** custom close buttons to `Window:Close()` (e.g. via `Section:CreateCloseButton`, below) so the GUI always fades out gracefully instead of vanishing instantly.
+- `Window:Refresh()` re-skins every existing element on this window to match the current theme (see [CuteWare:Refresh()](#cutewarerefresh)) — call it after `CuteWare:SetAccentColor(...)`.
 - `Window:AddTabButton` is **entirely optional** — only call it if you want an extra utility button pinned to the bottom of the tab list (outside the scrollable tab area).
 
 ---
@@ -163,6 +202,8 @@ The name argument is **optional** — `Tab:CreateSection()` with no argument fal
 ## Section Elements
 
 Every element below takes a single config table. **Every field in every config table is optional** except where a table explicitly says "required" — omit anything you don't need and a sensible default is used instead.
+
+Every element created through a `Section` automatically participates in `CuteWare:Refresh()` — you never need to register anything yourself.
 
 ### Section:CreateButton
 
@@ -371,6 +412,16 @@ Section:CreateSlider({
 Section:CreateColorPicker({
     Name = "Color Picker", CurrentColor = Color3.fromRGB(255, 130, 180), -- both optional
     Callback = function(c) print(c) end, -- optional
+})
+
+-- live-refresh example: an accent color picker that re-skins everything
+-- already on screen the moment it changes
+Section:CreateColorPicker({
+    Name = "Accent Color", CurrentColor = Color3.fromRGB(255, 130, 180),
+    Callback = function(c)
+        CuteWare:SetAccentColor(c)
+        CuteWare:Refresh()
+    end,
 })
 
 Section:CreateCloseButton() -- no arguments needed at all

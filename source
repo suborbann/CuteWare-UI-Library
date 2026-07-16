@@ -20,9 +20,6 @@ local Debris           = game:GetService("Debris")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
 
---------------------------------------------------------------------
--- THEME
---------------------------------------------------------------------
 local Theme = {
     Background = Color3.fromRGB(24, 24, 28),
     Secondary  = Color3.fromRGB(32, 32, 38),
@@ -40,9 +37,6 @@ local Theme = {
 
 local STARTUP_SOUND_ID = "rbxassetid://135244211779631"
 
---------------------------------------------------------------------
--- UTILITIES
---------------------------------------------------------------------
 local function tween(obj, info, props)
     local t = TweenService:Create(obj, info, props); t:Play(); return t
 end
@@ -84,11 +78,6 @@ local function pointInside(frame, pos)
     return pos.X >= a.X and pos.X <= a.X + sz.X and pos.Y >= a.Y and pos.Y <= a.Y + sz.Y
 end
 
--- masks sync their transparency (and color) live with the panel they
--- belong to, instead of being frozen at creation time. `skipMasks`, when
--- true, only applies the UICorner and skips creating the corner-mask
--- frames entirely (used when a background image is active, so the image
--- isn't chopped up by square mask patches).
 local function applyPanelCorners(panel, radius, keep, skipMasks)
     corner(radius).Parent = panel
     if skipMasks then return {} end
@@ -153,10 +142,6 @@ local function resolveImage(source)
     return "rbxassetid://" .. source
 end
 
--- spawnRipple now takes an optional `parentOverride` - if given, the
--- growing ripple circle is parented there instead of `button` directly.
--- Used so the ripple can be clipped inside a dedicated rounded layer
--- rather than the tab button itself.
 local function spawnRipple(button, relX, relY, color, fillDuration, rippleZIndex, parentOverride)
     fillDuration = fillDuration or 0.22
     local w = button.AbsoluteSize.X
@@ -191,9 +176,6 @@ local KeybindMap = {
     M      = Enum.KeyCode.M,
 }
 
--- A harmless proxy object: every method call on it just returns itself,
--- so any chain like Window:CreateTab(...):CreateSection(...):CreateButton(...)
--- works without erroring, but nothing is ever actually created or shown.
 local function makeNoOpProxy()
     local proxy = {}
     setmetatable(proxy, {
@@ -204,20 +186,30 @@ local function makeNoOpProxy()
     return proxy
 end
 
---------------------------------------------------------------------
--- LIBRARY ROOT
---------------------------------------------------------------------
 local CuteWare = {}
 CuteWare.__index = CuteWare
 CuteWare.Flags  = {}
+CuteWare._refreshers = {}
 
--- Change the global accent color used by every window/component created
--- from this point onward. Pass a second color for the darker hover/press
--- shade, or leave it out to have one derived automatically.
+local function registerRefresh(fn)
+    table.insert(CuteWare._refreshers, fn)
+end
+
 function CuteWare:SetAccentColor(color, darkColor)
     if not color then return end
     Theme.Accent = color
     Theme.AccentDark = darkColor or darken(color, 0.8)
+end
+
+function CuteWare:Refresh()
+    local alive = {}
+    for _, fn in ipairs(self._refreshers) do
+        local ok, keep = pcall(fn)
+        if ok and keep ~= false then
+            table.insert(alive, fn)
+        end
+    end
+    self._refreshers = alive
 end
 
 function CuteWare:Init()
@@ -248,8 +240,8 @@ function CuteWare:Init()
     }, { create("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 10), VerticalAlignment = Enum.VerticalAlignment.Bottom, HorizontalAlignment = Enum.HorizontalAlignment.Right }) })
 
     self._mainFrame = nil
+    self._refreshers = {}
 
-    -- reset per-session key-system state
     self._keySystemFailed = false
 
     pcall(function()
@@ -264,9 +256,6 @@ function CuteWare:Init()
     return self
 end
 
---------------------------------------------------------------------
--- CuteWare:CreateKeySystem(config)
---------------------------------------------------------------------
 function CuteWare:CreateKeySystem(config)
     config = config or {}
     if not config.Enabled then return true end
@@ -389,12 +378,6 @@ function CuteWare:CreateKeySystem(config)
     Overlay:Destroy()
 
     if closedManually and not approved then
-        -- FIX #1: remember that the key system was closed without a valid
-        -- key, regardless of whether OnClose is provided. CreateWindow
-        -- checks this flag on its very first line and refuses to build a
-        -- real window if it's set - so even if the caller's script keeps
-        -- running and calls CreateWindow anyway, the main window will
-        -- never actually appear.
         self._keySystemFailed = true
 
         if config.OnClose then
@@ -405,9 +388,6 @@ function CuteWare:CreateKeySystem(config)
     return true
 end
 
---------------------------------------------------------------------
--- CuteWare:Notify(config)
---------------------------------------------------------------------
 function CuteWare:Notify(config)
     config = config or {}
     local title    = config.Title    or "Notification"
@@ -526,9 +506,6 @@ function CuteWare:Notify(config)
     end
 end
 
---------------------------------------------------------------------
--- CuteWare:NotifyBig(config)
---------------------------------------------------------------------
 function CuteWare:NotifyBig(config)
     config = config or {}
     local title    = config.Title    or "Notice"
@@ -635,24 +612,14 @@ function CuteWare:NotifyBig(config)
     end)
 end
 
---------------------------------------------------------------------
--- CuteWare:CreateWindow(config)
---------------------------------------------------------------------
 function CuteWare:CreateWindow(config)
     config = config or {}
 
-    -- FIX #1: if the key system was closed with the X and no valid key was
-    -- entered, refuse to build a real window - return a no-op stub so the
-    -- caller's script can keep calling Window:CreateTab()/etc without
-    -- erroring, but nothing ever gets created or shown.
     if self._keySystemFailed then
         warn("[CuteWare] Key system was closed without a valid key - window not created.")
         return makeNoOpProxy()
     end
 
-    -- ACCENT COLOR OVERRIDE: lets the caller swap out the default pink
-    -- accent for anything else. Applies globally (affects every widget
-    -- created from here on), matching how Theme is already shared.
     if config.AccentColor then
         CuteWare:SetAccentColor(config.AccentColor, config.AccentColorDark)
     end
@@ -663,11 +630,6 @@ function CuteWare:CreateWindow(config)
     local titleIcon  = resolveImage(config.Icon)
     local bgImage    = resolveImage(config.BackgroundImage)
     local bgTransp   = config.BackgroundImageTransparency or 0.75
-    -- FIX #3: white/transparent gradient wash on the background that UI
-    -- components sit on - i.e. each Section box (the rounded panel that
-    -- holds buttons/toggles/sliders/etc), not the buttons themselves. Now
-    -- on by default always (previously only auto-enabled with a
-    -- background image). Force off with config.ComponentGradient = false.
     local useComponentGradient = config.ComponentGradient ~= false
 
     local TOPBAR_H = 38
@@ -685,13 +647,11 @@ function CuteWare:CreateWindow(config)
         ClipsDescendants = true,
     }, { corner(12), stroke(Theme.Stroke, 1) })
     self._mainFrame = Main
+    registerRefresh(function()
+        if not Main.Parent then return false end
+        Main.BackgroundColor3 = Theme.Background
+    end)
 
-    -- FadeCover: a single opaque overlay used ONLY to mask the open/close
-    -- transition. Instead of walking every descendant and toggling its
-    -- transparency (which corrupted internal state like which tab was
-    -- active, open dropdowns, toggle states, etc.), we just fade this
-    -- cover in front of everything, hide/show Main underneath it, then
-    -- fade it back out. Nothing inside Main is ever touched.
     local FadeCover = create("Frame", {
         Name = "FadeCover",
         BackgroundColor3 = Theme.Background,
@@ -702,6 +662,10 @@ function CuteWare:CreateWindow(config)
         Visible = false,
         Parent = Main,
     }, { corner(12) })
+    registerRefresh(function()
+        if not FadeCover.Parent then return false end
+        FadeCover.BackgroundColor3 = Theme.Background
+    end)
 
     local BackgroundImage
     if bgImage then
@@ -728,15 +692,16 @@ function CuteWare:CreateWindow(config)
         bgImage = resolved
     end
 
+    function Window:Refresh()
+        CuteWare:Refresh()
+    end
+
     Main.Size = UDim2.new(0, size.X.Offset * 0.4, 0, size.Y.Offset * 0.4)
     Main.BackgroundTransparency = 1
     tween(Main, TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
         Size = size, BackgroundTransparency = 0,
     })
 
-    ----------------------------------------------------------------
-    -- TOP BAR
-    ----------------------------------------------------------------
     local TopBar = create("Frame", {
         Name = "TopBar",
         BackgroundColor3 = darken(Theme.Secondary, 0.92),
@@ -744,8 +709,10 @@ function CuteWare:CreateWindow(config)
         Size = UDim2.new(1, 0, 0, TOPBAR_H),
         Parent = Main,
     })
-    -- Corner masks are skipped when a background image is present so the
-    -- image isn't interrupted by square mask patches at the top corners.
+    registerRefresh(function()
+        if not TopBar.Parent then return false end
+        TopBar.BackgroundColor3 = darken(Theme.Secondary, 0.92)
+    end)
     local topBarMasks = applyPanelCorners(TopBar, 12, { TopLeft = true, TopRight = true, BottomLeft = false, BottomRight = false }, bgImage ~= nil)
 
     local titleOffset = 16
@@ -759,25 +726,34 @@ function CuteWare:CreateWindow(config)
     end
 
     if subtitle and subtitle ~= "" then
-        create("TextLabel", {
+        local TitleLabel = create("TextLabel", {
             Text = windowName, Font = Theme.FontBold, TextSize = 16, TextColor3 = Theme.Text,
             BackgroundTransparency = 1,
             Position = UDim2.new(0, titleOffset, 0, 4), Size = UDim2.new(1, -titleOffset - 110, 0, 18),
             TextXAlignment = Enum.TextXAlignment.Left, Parent = TopBar,
         })
-        create("TextLabel", {
+        local SubtitleLabel = create("TextLabel", {
             Text = subtitle, Font = Theme.Font, TextSize = 12, TextColor3 = Theme.SubText,
             BackgroundTransparency = 1,
             Position = UDim2.new(0, titleOffset, 0, 20), Size = UDim2.new(1, -titleOffset - 110, 0, 14),
             TextXAlignment = Enum.TextXAlignment.Left, Parent = TopBar,
         })
+        registerRefresh(function()
+            if not TitleLabel.Parent then return false end
+            TitleLabel.TextColor3 = Theme.Text
+            SubtitleLabel.TextColor3 = Theme.SubText
+        end)
     else
-        create("TextLabel", {
+        local TitleLabel = create("TextLabel", {
             Text = windowName, Font = Theme.FontBold, TextSize = 20, TextColor3 = Theme.Text,
             BackgroundTransparency = 1,
             Position = UDim2.new(0, titleOffset, 0, 0), Size = UDim2.new(1, -titleOffset - 110, 1, 0),
             TextXAlignment = Enum.TextXAlignment.Left, Parent = TopBar,
         })
+        registerRefresh(function()
+            if not TitleLabel.Parent then return false end
+            TitleLabel.TextColor3 = Theme.Text
+        end)
     end
 
     local DragCatcher = create("Frame", {
@@ -809,6 +785,10 @@ function CuteWare:CreateWindow(config)
         }, { corner(6) })
         b.MouseEnter:Connect(function() quickTween(b, { BackgroundTransparency = 0, TextColor3 = hoverText }, 0.15) end)
         b.MouseLeave:Connect(function() quickTween(b, { BackgroundTransparency = 1, TextColor3 = Theme.SubText }, 0.15) end)
+        registerRefresh(function()
+            if not b.Parent then return false end
+            b.TextColor3 = Theme.SubText
+        end)
         return b
     end
 
@@ -816,9 +796,6 @@ function CuteWare:CreateWindow(config)
     local MaxBtn   = makeCtrlBtn("▢", darken(Theme.Tertiary, 0.9), Theme.Accent, 2)
     local CloseBtn = makeCtrlBtn("╳", darken(Theme.Error, 0.5), Theme.Text, 3)
 
-    ----------------------------------------------------------------
-    -- MINIMIZE / MAXIMIZE
-    ----------------------------------------------------------------
     local minimized, maximized = false, false
     local windowSize = size
     local windowPos  = Main.Position
@@ -875,7 +852,6 @@ function CuteWare:CreateWindow(config)
         end
     end)
 
-    --------------------------------------------------------------------
     local function currentTargetSizePos()
         if maximized then
             return UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0)
@@ -944,7 +920,6 @@ function CuteWare:CreateWindow(config)
         task.spawn(function() Window:Close() end)
     end)
 
-    ----------------------------------------------------------------
     local toggleKey = config.ToggleKeybind or Enum.KeyCode.RightControl
     local toggling = false
 
@@ -964,7 +939,6 @@ function CuteWare:CreateWindow(config)
         end
     end)
 
-    ----------------------------------------------------------------
     do
         local dragging = false
         local dragStart, startPos
@@ -1018,9 +992,6 @@ function CuteWare:CreateWindow(config)
         end)
     end
 
-    ----------------------------------------------------------------
-    -- TAB LIST SHELL
-    ----------------------------------------------------------------
     TabListShell = create("Frame", {
         Name = "TabListShell",
         BackgroundColor3 = Theme.Secondary,
@@ -1029,8 +1000,10 @@ function CuteWare:CreateWindow(config)
         Size = UDim2.new(0, 140, 1, -TOPBAR_H),
         Parent = Main,
     })
-    -- Same as TopBar: skip the square corner masks once a background image
-    -- is active.
+    registerRefresh(function()
+        if not TabListShell.Parent then return false end
+        TabListShell.BackgroundColor3 = Theme.Secondary
+    end)
     applyPanelCorners(TabListShell, 12, { TopLeft = false, TopRight = false, BottomLeft = true, BottomRight = false }, bgImage ~= nil)
 
     local TabList = create("Frame", {
@@ -1042,9 +1015,6 @@ function CuteWare:CreateWindow(config)
         padding(10),
     })
 
-    ----------------------------------------------------------------
-    -- CONTENT AREA
-    ----------------------------------------------------------------
     ContentArea = create("Frame", {
         Name = "ContentArea",
         BackgroundTransparency = 1,
@@ -1070,16 +1040,18 @@ function CuteWare:CreateWindow(config)
         Btn.MouseButton1Click:Connect(function()
             if c.Callback then c.Callback() end
         end)
+        registerRefresh(function()
+            if not Btn.Parent then return false end
+            Btn.BackgroundColor3 = darken(Theme.Secondary, 0.8)
+            Btn.TextColor3 = Theme.SubText
+        end)
         return Btn
     end
 
-    ----------------------------------------------------------------
     function Window:CreateTab(tabConfig)
         tabConfig = tabConfig or {}
         local tabName = tabConfig.Name or "Tab"
 
-        -- Slightly more transparent when a background image is showing, so
-        -- the tab list doesn't look like a solid opaque block over the art.
         local tabActiveTransparency = bgImage and 0.35 or 0
 
         local TabBtn = create("TextButton", {
@@ -1092,12 +1064,6 @@ function CuteWare:CreateWindow(config)
             Parent = TabList,
         }, { corner(8) })
 
-        -- FIX #2: dedicated rounded, clipped layer for the click-ripple so
-        -- it's contained inside the tab's own rounded shape as closely as
-        -- Roblox allows (ClipsDescendants clips to the rectangular bounds
-        -- regardless of UICorner, but this keeps the ripple visually tied
-        -- to the tab's corner radius instead of floating loose on top of
-        -- the raw button).
         local RippleLayer = create("Frame", {
             Name = "RippleLayer",
             BackgroundTransparency = 1,
@@ -1138,6 +1104,13 @@ function CuteWare:CreateWindow(config)
         updateCanvas()
 
         local Tab = { Page = Page, Button = TabBtn, Label = TabLabel, Active = false }
+
+        registerRefresh(function()
+            if not TabBtn.Parent then return false end
+            TabBtn.BackgroundColor3 = Theme.Tertiary
+            Page.ScrollBarImageColor3 = Theme.Accent
+            TabLabel.TextColor3 = Tab.Active and Theme.Text or Theme.SubText
+        end)
 
         local function selectTab(clickX, clickY)
             for _, t in pairs(Window.Tabs) do
@@ -1202,9 +1175,11 @@ function CuteWare:CreateWindow(config)
                 corner(10), stroke(Theme.Stroke, 1), padding(12),
                 create("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }),
             })
+            registerRefresh(function()
+                if not SH.Parent then return false end
+                SH.BackgroundColor3 = Theme.Secondary
+            end)
 
-            -- FIX #3: white/transparent gradient wash behind the section's
-            -- contents, now on by default (see useComponentGradient above).
             if useComponentGradient then
                 local gradient = create("UIGradient", {
                     Color = ColorSequence.new{
@@ -1220,12 +1195,16 @@ function CuteWare:CreateWindow(config)
                 gradient.Parent = SH
             end
 
-            create("TextLabel", {
+            local SectionTitle = create("TextLabel", {
                 Text = name or "Section", Font = Theme.FontBold, TextSize = 14,
                 TextColor3 = Theme.Text, BackgroundTransparency = 1,
                 Size = UDim2.new(1, 0, 0, 18),
                 TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 0, Parent = SH,
             })
+            registerRefresh(function()
+                if not SectionTitle.Parent then return false end
+                SectionTitle.TextColor3 = Theme.Text
+            end)
 
             local Section = { Holder = SH }
 
@@ -1242,6 +1221,11 @@ function CuteWare:CreateWindow(config)
                 Btn.MouseButton1Down:Connect(function() quickTween(Btn, { Size = UDim2.new(1, -6, 0, 32) }, 0.08) end)
                 Btn.MouseButton1Up:Connect(function() quickTween(Btn, { Size = UDim2.new(1, 0, 0, 34) }, 0.12) end)
                 Btn.MouseButton1Click:Connect(function() if c.Callback then c.Callback() end end)
+                registerRefresh(function()
+                    if not Btn.Parent then return false end
+                    Btn.BackgroundColor3 = Theme.Tertiary
+                    Btn.TextColor3 = Theme.Text
+                end)
                 return Btn
             end
 
@@ -1260,7 +1244,7 @@ function CuteWare:CreateWindow(config)
                 c = c or {}
                 local state = c.CurrentValue or false
                 local H = create("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 30), Parent = SH })
-                create("TextLabel", {
+                local NameLabel = create("TextLabel", {
                     Text = c.Name or "Toggle", Font = Theme.Font, TextSize = 13,
                     TextColor3 = Theme.Text, BackgroundTransparency = 1,
                     Size = UDim2.new(1, -54, 1, 0), TextXAlignment = Enum.TextXAlignment.Left, Parent = H,
@@ -1287,6 +1271,11 @@ function CuteWare:CreateWindow(config)
                 end
                 Cl.MouseButton1Click:Connect(function() tog:Set(not state) end)
                 if c.Flag then CuteWare.Flags[c.Flag] = state end
+                registerRefresh(function()
+                    if not H.Parent then return false end
+                    NameLabel.TextColor3 = Theme.Text
+                    Sw.BackgroundColor3 = state and Theme.Accent or Theme.Tertiary
+                end)
                 return tog
             end
 
@@ -1297,7 +1286,7 @@ function CuteWare:CreateWindow(config)
                 local inc = c.Increment or 1
                 local val = c.CurrentValue or mn
                 local H = create("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 42), Parent = SH })
-                create("TextLabel", {
+                local NameLabel = create("TextLabel", {
                     Text = c.Name or "Slider", Font = Theme.Font, TextSize = 13,
                     TextColor3 = Theme.Text, BackgroundTransparency = 1,
                     Size = UDim2.new(1, -50, 0, 18), TextXAlignment = Enum.TextXAlignment.Left, Parent = H,
@@ -1356,6 +1345,13 @@ function CuteWare:CreateWindow(config)
                     if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then upd(i.Position) end
                 end)
                 if c.Flag then CuteWare.Flags[c.Flag] = val end
+                registerRefresh(function()
+                    if not H.Parent then return false end
+                    NameLabel.TextColor3 = Theme.Text
+                    VL.TextColor3 = Theme.SubText
+                    Bar.BackgroundColor3 = Theme.Tertiary
+                    Fill.BackgroundColor3 = Theme.Accent
+                end)
                 return H
             end
 
@@ -1372,7 +1368,7 @@ function CuteWare:CreateWindow(config)
                     Parent = SH,
                     ClipsDescendants = false,
                 })
-                create("TextLabel", {
+                local NameLabel = create("TextLabel", {
                     Text = c.Name or "Dropdown", Font = Theme.Font, TextSize = 13,
                     TextColor3 = Theme.Text, BackgroundTransparency = 1,
                     Size = UDim2.new(1, 0, 0, 18), TextXAlignment = Enum.TextXAlignment.Left, Parent = H,
@@ -1483,6 +1479,17 @@ function CuteWare:CreateWindow(config)
                 end)
 
                 if c.Flag then CuteWare.Flags[c.Flag] = cur end
+                registerRefresh(function()
+                    if not H.Parent then return false end
+                    NameLabel.TextColor3 = Theme.Text
+                    Box.BackgroundColor3 = Theme.Tertiary
+                    Arrow.TextColor3 = Theme.SubText
+                    OptionList.BackgroundColor3 = Theme.Tertiary
+                    for _, b in pairs(optBtns) do
+                        local isSel = mode == "multi" and selSet[b.Text] or (mode == "single" and b.Text == tostring(cur))
+                        b.TextColor3 = isSel and Theme.Accent or Theme.SubText
+                    end
+                end)
                 return H
             end
 
@@ -1512,7 +1519,7 @@ function CuteWare:CreateWindow(config)
                     Parent = SH, ClipsDescendants = true,
                 })
                 local Header = create("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 30), Parent = H })
-                create("TextLabel", {
+                local NameLabel = create("TextLabel", {
                     Text = c.Name or "Color", Font = Theme.Font, TextSize = 13,
                     TextColor3 = Theme.Text, BackgroundTransparency = 1,
                     Size = UDim2.new(1, -40, 1, 0), TextXAlignment = Enum.TextXAlignment.Left, Parent = Header,
@@ -1619,13 +1626,17 @@ function CuteWare:CreateWindow(config)
                 end)
 
                 if flag then CuteWare.Flags[flag] = col end
+                registerRefresh(function()
+                    if not H.Parent then return false end
+                    NameLabel.TextColor3 = Theme.Text
+                end)
                 return H
             end
 
             function Section:CreateTextbox(c)
                 c = c or {}
                 local H = create("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 52), Parent = SH })
-                create("TextLabel", {
+                local NameLabel = create("TextLabel", {
                     Text = c.Name or "Input", Font = Theme.Font, TextSize = 13,
                     TextColor3 = Theme.Text, BackgroundTransparency = 1,
                     Size = UDim2.new(1, 0, 0, 18), TextXAlignment = Enum.TextXAlignment.Left, Parent = H,
@@ -1649,6 +1660,12 @@ function CuteWare:CreateWindow(config)
                     if c.Callback then c.Callback(Input.Text, enter) end
                 end)
                 if c.Flag then CuteWare.Flags[c.Flag] = Input.Text end
+                registerRefresh(function()
+                    if not H.Parent then return false end
+                    NameLabel.TextColor3 = Theme.Text
+                    Box.BackgroundColor3 = Theme.Tertiary
+                    Input.TextColor3 = Theme.Text
+                end)
                 return H
             end
 
@@ -1657,7 +1674,7 @@ function CuteWare:CreateWindow(config)
                 local curKey    = c.CurrentKeybind or Enum.KeyCode.F
                 local listening = false
                 local H = create("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 30), Parent = SH })
-                create("TextLabel", {
+                local NameLabel = create("TextLabel", {
                     Text = c.Name or "Keybind", Font = Theme.Font, TextSize = 13,
                     TextColor3 = Theme.Text, BackgroundTransparency = 1,
                     Size = UDim2.new(1, -80, 1, 0), TextXAlignment = Enum.TextXAlignment.Left, Parent = H,
@@ -1683,16 +1700,29 @@ function CuteWare:CreateWindow(config)
                     end
                 end)
                 if c.Flag then CuteWare.Flags[c.Flag] = curKey end
+                registerRefresh(function()
+                    if not H.Parent then return false end
+                    NameLabel.TextColor3 = Theme.Text
+                    if not listening then
+                        KB.BackgroundColor3 = Theme.Tertiary
+                    end
+                    KB.TextColor3 = Theme.Text
+                end)
                 return H
             end
 
             function Section:CreateLabel(text)
-                return create("TextLabel", {
+                local Lbl = create("TextLabel", {
                     Text = text or "", Font = Theme.Font, TextSize = 13,
                     TextColor3 = Theme.SubText, BackgroundTransparency = 1,
                     Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
                     TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, Parent = SH,
                 })
+                registerRefresh(function()
+                    if not Lbl.Parent then return false end
+                    Lbl.TextColor3 = Theme.SubText
+                end)
+                return Lbl
             end
 
             return Section

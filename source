@@ -20,6 +20,9 @@ local Debris           = game:GetService("Debris")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
 
+--------------------------------------------------------------------
+-- THEME
+--------------------------------------------------------------------
 local Theme = {
     Background = Color3.fromRGB(24, 24, 28),
     Secondary  = Color3.fromRGB(32, 32, 38),
@@ -37,6 +40,9 @@ local Theme = {
 
 local STARTUP_SOUND_ID = "rbxassetid://135244211779631"
 
+--------------------------------------------------------------------
+-- UTILITIES
+--------------------------------------------------------------------
 local function tween(obj, info, props)
     local t = TweenService:Create(obj, info, props); t:Play(); return t
 end
@@ -78,6 +84,11 @@ local function pointInside(frame, pos)
     return pos.X >= a.X and pos.X <= a.X + sz.X and pos.Y >= a.Y and pos.Y <= a.Y + sz.Y
 end
 
+-- masks sync their transparency (and color) live with the panel they
+-- belong to, instead of being frozen at creation time. `skipMasks`, when
+-- true, only applies the UICorner and skips creating the corner-mask
+-- frames entirely (used when a background image is active, so the image
+-- isn't chopped up by square mask patches).
 local function applyPanelCorners(panel, radius, keep, skipMasks)
     corner(radius).Parent = panel
     if skipMasks then return {} end
@@ -142,6 +153,10 @@ local function resolveImage(source)
     return "rbxassetid://" .. source
 end
 
+-- spawnRipple now takes an optional `parentOverride` - if given, the
+-- growing ripple circle is parented there instead of `button` directly.
+-- Used so the ripple can be clipped inside a dedicated rounded layer
+-- rather than the tab button itself.
 local function spawnRipple(button, relX, relY, color, fillDuration, rippleZIndex, parentOverride)
     fillDuration = fillDuration or 0.22
     local w = button.AbsoluteSize.X
@@ -176,6 +191,9 @@ local KeybindMap = {
     M      = Enum.KeyCode.M,
 }
 
+-- A harmless proxy object: every method call on it just returns itself,
+-- so any chain like Window:CreateTab(...):CreateSection(...):CreateButton(...)
+-- works without erroring, but nothing is ever actually created or shown.
 local function makeNoOpProxy()
     local proxy = {}
     setmetatable(proxy, {
@@ -186,21 +204,37 @@ local function makeNoOpProxy()
     return proxy
 end
 
+--------------------------------------------------------------------
+-- LIBRARY ROOT
+--------------------------------------------------------------------
 local CuteWare = {}
 CuteWare.__index = CuteWare
 CuteWare.Flags  = {}
 CuteWare._refreshers = {}
 
+-- Registers a function to be called whenever CuteWare:Refresh() runs.
+-- Each refresher re-applies live Theme colors to one already-created
+-- instance. If the instance no longer exists, the refresher removes
+-- itself the next time Refresh() runs.
 local function registerRefresh(fn)
     table.insert(CuteWare._refreshers, fn)
 end
 
+-- Change the global accent color used by every window/component created
+-- from this point onward. Pass a second color for the darker hover/press
+-- shade, or leave it out to have one derived automatically.
 function CuteWare:SetAccentColor(color, darkColor)
     if not color then return end
     Theme.Accent = color
     Theme.AccentDark = darkColor or darken(color, 0.8)
 end
 
+-- Re-applies the current Theme colors (accent, background, text, etc.) to
+-- every already-created UI element, without rebuilding or losing any
+-- state (open tab, toggle values, slider positions, dropdown selections,
+-- scroll position, and so on stay exactly as they were). Call this after
+-- CuteWare:SetAccentColor(...) or after editing Theme fields directly to
+-- re-skin a window that's already on screen.
 function CuteWare:Refresh()
     local alive = {}
     for _, fn in ipairs(self._refreshers) do
@@ -242,6 +276,7 @@ function CuteWare:Init()
     self._mainFrame = nil
     self._refreshers = {}
 
+    -- reset per-session key-system state
     self._keySystemFailed = false
 
     pcall(function()
@@ -256,6 +291,9 @@ function CuteWare:Init()
     return self
 end
 
+--------------------------------------------------------------------
+-- CuteWare:CreateKeySystem(config)
+--------------------------------------------------------------------
 function CuteWare:CreateKeySystem(config)
     config = config or {}
     if not config.Enabled then return true end
@@ -378,6 +416,12 @@ function CuteWare:CreateKeySystem(config)
     Overlay:Destroy()
 
     if closedManually and not approved then
+        -- FIX #1: remember that the key system was closed without a valid
+        -- key, regardless of whether OnClose is provided. CreateWindow
+        -- checks this flag on its very first line and refuses to build a
+        -- real window if it's set - so even if the caller's script keeps
+        -- running and calls CreateWindow anyway, the main window will
+        -- never actually appear.
         self._keySystemFailed = true
 
         if config.OnClose then
@@ -388,6 +432,9 @@ function CuteWare:CreateKeySystem(config)
     return true
 end
 
+--------------------------------------------------------------------
+-- CuteWare:Notify(config)
+--------------------------------------------------------------------
 function CuteWare:Notify(config)
     config = config or {}
     local title    = config.Title    or "Notification"
@@ -506,6 +553,9 @@ function CuteWare:Notify(config)
     end
 end
 
+--------------------------------------------------------------------
+-- CuteWare:NotifyBig(config)
+--------------------------------------------------------------------
 function CuteWare:NotifyBig(config)
     config = config or {}
     local title    = config.Title    or "Notice"
@@ -612,14 +662,24 @@ function CuteWare:NotifyBig(config)
     end)
 end
 
+--------------------------------------------------------------------
+-- CuteWare:CreateWindow(config)
+--------------------------------------------------------------------
 function CuteWare:CreateWindow(config)
     config = config or {}
 
+    -- FIX #1: if the key system was closed with the X and no valid key was
+    -- entered, refuse to build a real window - return a no-op stub so the
+    -- caller's script can keep calling Window:CreateTab()/etc without
+    -- erroring, but nothing ever gets created or shown.
     if self._keySystemFailed then
         warn("[CuteWare] Key system was closed without a valid key - window not created.")
         return makeNoOpProxy()
     end
 
+    -- ACCENT COLOR OVERRIDE: lets the caller swap out the default pink
+    -- accent for anything else. Applies globally (affects every widget
+    -- created from here on), matching how Theme is already shared.
     if config.AccentColor then
         CuteWare:SetAccentColor(config.AccentColor, config.AccentColorDark)
     end
@@ -630,6 +690,11 @@ function CuteWare:CreateWindow(config)
     local titleIcon  = resolveImage(config.Icon)
     local bgImage    = resolveImage(config.BackgroundImage)
     local bgTransp   = config.BackgroundImageTransparency or 0.75
+    -- FIX #3: white/transparent gradient wash on the background that UI
+    -- components sit on - i.e. each Section box (the rounded panel that
+    -- holds buttons/toggles/sliders/etc), not the buttons themselves. Now
+    -- on by default always (previously only auto-enabled with a
+    -- background image). Force off with config.ComponentGradient = false.
     local useComponentGradient = config.ComponentGradient ~= false
 
     local TOPBAR_H = 38
@@ -652,6 +717,12 @@ function CuteWare:CreateWindow(config)
         Main.BackgroundColor3 = Theme.Background
     end)
 
+    -- FadeCover: a single opaque overlay used ONLY to mask the open/close
+    -- transition. Instead of walking every descendant and toggling its
+    -- transparency (which corrupted internal state like which tab was
+    -- active, open dropdowns, toggle states, etc.), we just fade this
+    -- cover in front of everything, hide/show Main underneath it, then
+    -- fade it back out. Nothing inside Main is ever touched.
     local FadeCover = create("Frame", {
         Name = "FadeCover",
         BackgroundColor3 = Theme.Background,
@@ -692,6 +763,9 @@ function CuteWare:CreateWindow(config)
         bgImage = resolved
     end
 
+    -- Convenience alias so a window reference can re-skin itself without
+    -- reaching back into the CuteWare module: Window:Refresh() just calls
+    -- CuteWare:Refresh() under the hood.
     function Window:Refresh()
         CuteWare:Refresh()
     end
@@ -702,6 +776,9 @@ function CuteWare:CreateWindow(config)
         Size = size, BackgroundTransparency = 0,
     })
 
+    ----------------------------------------------------------------
+    -- TOP BAR
+    ----------------------------------------------------------------
     local TopBar = create("Frame", {
         Name = "TopBar",
         BackgroundColor3 = darken(Theme.Secondary, 0.92),
@@ -713,6 +790,8 @@ function CuteWare:CreateWindow(config)
         if not TopBar.Parent then return false end
         TopBar.BackgroundColor3 = darken(Theme.Secondary, 0.92)
     end)
+    -- Corner masks are skipped when a background image is present so the
+    -- image isn't interrupted by square mask patches at the top corners.
     local topBarMasks = applyPanelCorners(TopBar, 12, { TopLeft = true, TopRight = true, BottomLeft = false, BottomRight = false }, bgImage ~= nil)
 
     local titleOffset = 16
@@ -796,6 +875,9 @@ function CuteWare:CreateWindow(config)
     local MaxBtn   = makeCtrlBtn("▢", darken(Theme.Tertiary, 0.9), Theme.Accent, 2)
     local CloseBtn = makeCtrlBtn("╳", darken(Theme.Error, 0.5), Theme.Text, 3)
 
+    ----------------------------------------------------------------
+    -- MINIMIZE / MAXIMIZE
+    ----------------------------------------------------------------
     local minimized, maximized = false, false
     local windowSize = size
     local windowPos  = Main.Position
@@ -852,6 +934,7 @@ function CuteWare:CreateWindow(config)
         end
     end)
 
+    --------------------------------------------------------------------
     local function currentTargetSizePos()
         if maximized then
             return UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0)
@@ -920,6 +1003,7 @@ function CuteWare:CreateWindow(config)
         task.spawn(function() Window:Close() end)
     end)
 
+    ----------------------------------------------------------------
     local toggleKey = config.ToggleKeybind or Enum.KeyCode.RightControl
     local toggling = false
 
@@ -939,6 +1023,7 @@ function CuteWare:CreateWindow(config)
         end
     end)
 
+    ----------------------------------------------------------------
     do
         local dragging = false
         local dragStart, startPos
@@ -992,6 +1077,9 @@ function CuteWare:CreateWindow(config)
         end)
     end
 
+    ----------------------------------------------------------------
+    -- TAB LIST SHELL
+    ----------------------------------------------------------------
     TabListShell = create("Frame", {
         Name = "TabListShell",
         BackgroundColor3 = Theme.Secondary,
@@ -1004,6 +1092,8 @@ function CuteWare:CreateWindow(config)
         if not TabListShell.Parent then return false end
         TabListShell.BackgroundColor3 = Theme.Secondary
     end)
+    -- Same as TopBar: skip the square corner masks once a background image
+    -- is active.
     applyPanelCorners(TabListShell, 12, { TopLeft = false, TopRight = false, BottomLeft = true, BottomRight = false }, bgImage ~= nil)
 
     local TabList = create("Frame", {
@@ -1015,6 +1105,9 @@ function CuteWare:CreateWindow(config)
         padding(10),
     })
 
+    ----------------------------------------------------------------
+    -- CONTENT AREA
+    ----------------------------------------------------------------
     ContentArea = create("Frame", {
         Name = "ContentArea",
         BackgroundTransparency = 1,
@@ -1048,10 +1141,13 @@ function CuteWare:CreateWindow(config)
         return Btn
     end
 
+    ----------------------------------------------------------------
     function Window:CreateTab(tabConfig)
         tabConfig = tabConfig or {}
         local tabName = tabConfig.Name or "Tab"
 
+        -- Slightly more transparent when a background image is showing, so
+        -- the tab list doesn't look like a solid opaque block over the art.
         local tabActiveTransparency = bgImage and 0.35 or 0
 
         local TabBtn = create("TextButton", {
@@ -1064,6 +1160,12 @@ function CuteWare:CreateWindow(config)
             Parent = TabList,
         }, { corner(8) })
 
+        -- FIX #2: dedicated rounded, clipped layer for the click-ripple so
+        -- it's contained inside the tab's own rounded shape as closely as
+        -- Roblox allows (ClipsDescendants clips to the rectangular bounds
+        -- regardless of UICorner, but this keeps the ripple visually tied
+        -- to the tab's corner radius instead of floating loose on top of
+        -- the raw button).
         local RippleLayer = create("Frame", {
             Name = "RippleLayer",
             BackgroundTransparency = 1,
@@ -1180,6 +1282,8 @@ function CuteWare:CreateWindow(config)
                 SH.BackgroundColor3 = Theme.Secondary
             end)
 
+            -- FIX #3: white/transparent gradient wash behind the section's
+            -- contents, now on by default (see useComponentGradient above).
             if useComponentGradient then
                 local gradient = create("UIGradient", {
                     Color = ColorSequence.new{
@@ -1490,7 +1594,85 @@ function CuteWare:CreateWindow(config)
                         b.TextColor3 = isSel and Theme.Accent or Theme.SubText
                     end
                 end)
-                return H
+
+                local dropdownObj = { Frame = H }
+
+                -- Refresh(newOptions): replaces the option list in-place.
+                -- Preserves mode, flag, callback and label; closes the list
+                -- if it was open; clears old selection if the previously
+                -- selected value is no longer present in the new list.
+                function dropdownObj:Refresh(newOptions)
+                    newOptions = newOptions or {}
+
+                    -- close if open
+                    if open then
+                        open = false
+                        quickTween(Arrow, { Rotation = 0 }, 0.12)
+                        OptionList.Visible = false
+                        quickTween(Box, { BackgroundColor3 = Theme.Tertiary }, 0.12)
+                    end
+
+                    -- clear old buttons
+                    for _, b in ipairs(optBtns) do
+                        if b and b.Parent then b:Destroy() end
+                    end
+                    optBtns = {}
+
+                    opts = newOptions
+                    optH  = #opts * 30
+
+                    -- prune stale selections
+                    if mode == "multi" then
+                        local newSet = {}
+                        for _, o in ipairs(opts) do if selSet[o] then newSet[o] = true end end
+                        selSet = newSet
+                    else
+                        local found = false
+                        for _, o in ipairs(opts) do if o == cur then found = true break end end
+                        if not found then cur = opts[1] end
+                    end
+
+                    -- rebuild buttons
+                    for i, opt in ipairs(opts) do
+                        local isSel = mode == "multi" and selSet[opt] or (mode == "single" and opt == cur)
+                        local OB = create("TextButton", {
+                            Text = tostring(opt), Font = Theme.Font, TextSize = 13,
+                            TextColor3 = isSel and Theme.Accent or Theme.SubText,
+                            BackgroundColor3 = Theme.Tertiary, BackgroundTransparency = 1,
+                            Size = UDim2.new(1, 0, 0, 30), LayoutOrder = i,
+                            ZIndex = 21, Parent = OptionList,
+                        })
+                        OB.MouseEnter:Connect(function() quickTween(OB, { BackgroundTransparency = 0.6 }, 0.1) end)
+                        OB.MouseLeave:Connect(function() quickTween(OB, { BackgroundTransparency = 1 }, 0.1) end)
+                        OB.MouseButton1Click:Connect(function()
+                            if mode == "multi" then
+                                selSet[opt] = not selSet[opt]
+                                OB.TextColor3 = selSet[opt] and Theme.Accent or Theme.SubText
+                                refreshLabel()
+                                local res = {}
+                                for _, o in ipairs(opts) do if selSet[o] then res[#res + 1] = o end end
+                                if c.Flag then CuteWare.Flags[c.Flag] = res end
+                                if c.Callback then c.Callback(res) end
+                            else
+                                cur = opt; refreshLabel()
+                                for _, b in pairs(optBtns) do b.TextColor3 = Theme.SubText end
+                                OB.TextColor3 = Theme.Accent
+                                if c.Flag then CuteWare.Flags[c.Flag] = cur end
+                                if c.Callback then c.Callback(cur) end
+                                open = false
+                                quickTween(Arrow, { Rotation = 0 }, 0.18)
+                                quickTween(OptionList, { Size = UDim2.new(1, -24, 0, 0) }, 0.18)
+                                task.delay(0.2, function() if not open then OptionList.Visible = false end end)
+                                quickTween(Box, { BackgroundColor3 = Theme.Tertiary }, 0.12)
+                            end
+                        end)
+                        optBtns[#optBtns + 1] = OB
+                    end
+
+                    refreshLabel()
+                end
+
+                return dropdownObj
             end
 
             function Section:CreateMenuKeybindDropdown(c)
